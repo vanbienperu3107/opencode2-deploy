@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render Compose configuration
+        run: docker compose --env-file .env.example config
+      - name: Parse OpenCode configuration
+        run: python3 -c 'import json; json.load(open("opencode.jsonc", encoding="utf-8"))'
+      - name: Validate public baseline
+        run: bash tests/validate-config.sh
