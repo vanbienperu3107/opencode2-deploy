@@ -64,4 +64,5 @@ def main() -> None:
         raise SystemExit(1)
 
 
-if __name__ == "__main__":n    main()
+if __name__ == "__main__":
+    main()
