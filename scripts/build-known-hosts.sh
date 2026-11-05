@@ -23,6 +23,11 @@ fail() {
   exit 1
 }
 
+is_literal_tailnet_hostname() {
+  local hostname=$1
+  [[ $hostname =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.ts\.net$ ]]
+}
+
 reject_unsafe_arguments() {
   local argument
   for argument in "$@"; do
@@ -89,9 +94,7 @@ while IFS= read -r line || test -n "$line"; do
 $line
 EOF
   test -n "${hostname:-}" && test -n "${fingerprint:-}" && test -n "${key_type:-}" && test -n "${key_blob:-}" && test -z "${extra:-}" || fail 'inventory entry must contain hostname fingerprint key-type key'
-  case "$hostname" in
-    root|root@*|-*|*@*|*,*|*' '*|*'['*|*']'*) fail "unsafe hostname: $hostname" ;;
-  esac
+  is_literal_tailnet_hostname "$hostname" || fail "unsafe hostname: $hostname"
   test -z "${seen_hostnames[$hostname]:-}" || fail "duplicate hostname: $hostname"
   seen_hostnames[$hostname]=1
   case "$fingerprint" in
