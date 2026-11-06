@@ -15,6 +15,6 @@ jobs:
       - name: Render Compose configuration
         run: docker compose --env-file .env.example config
       - name: Test validation contracts
-        run: python3 tests/test_contracts.py
+        run: python3 -m unittest -v tests.test_contracts
       - name: Validate public baseline
         run: bash tests/validate-config.sh
