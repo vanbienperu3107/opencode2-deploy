@@ -32,7 +32,8 @@ with `latest`.
   `/etc/opencode/opencode.jsonc` and selected explicitly with
   `OPENCODE_CONFIG`, not a host bind mount. It defines only the V2
   OpenAI-compatible CLIProxy provider at
-  `https://cliproxy.hangocthanh.io.vn/v1` and the required wildcard allow rule.
+  `https://cliproxy.hangocthanh.io.vn/v1`, the required wildcard allow rule,
+  and deployment default `cliproxy/deepseek-v4-flash`.
 
 ### Official image verification
 
@@ -50,20 +51,34 @@ Copy `.env.example` only on the deployment host or in a protected CI runtime,
 then supply nonempty values through the approved secret mechanism. Do not
 commit `.env`, a `secrets/` directory, private SSH keys, API keys, auth keys,
 or generated backups. The committed example intentionally has blank values.
+Production Compose fails before rendering or starting when either
+`OPENCODE_SERVER_PASSWORD` or `TS_AUTHKEY` is unset or empty. CI uses only the
+versioned, nonsecret placeholders in `tests/compose-ci.env` to render the
+contract; that file is never a deployment env file.
+
+### CLIProxy model inventory follow-up
+
+`deepseek-v4-flash` is the conservative deployment default because it is a
+known CLIProxy model ID in this project's verified operational inventory. The
+configuration intentionally does not guess model limits or capabilities. After
+deployment, query the authenticated CLIProxy `GET /v1/models` endpoint from the
+runtime boundary and compare the returned inventory before adding models or
+declaring model-specific limits/capabilities.
 
 ## Validate the baseline
 
 ```bash
-docker compose --env-file .env.example config
+docker compose --env-file tests/compose-ci.env config --format json
 python3 -m unittest -v tests.test_contracts
 bash tests/compose-contract.sh
 bash tests/validate-config.sh
 ```
 
-The checks render the Compose model, verify that only the sidecar receives TUN
-and `NET_ADMIN`, assert that the application has no public port or forbidden
-host/capability grants, and validate the exact V2 CLIProxy configuration.
-They do not start a runtime or authenticate to Tailnet.
+The checks parse the effective rendered Compose JSON, verify that only the
+sidecar receives TUN and `NET_ADMIN`, assert the app's network/volume/config/
+healthcheck isolation and nonempty required-secret interpolation, and validate
+the exact V2 CLIProxy configuration. They do not start a runtime or authenticate
+to Tailnet.
 
 ## Volume backup and restore boundary
 
