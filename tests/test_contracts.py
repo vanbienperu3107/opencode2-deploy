@@ -227,6 +227,20 @@ class SecretScannerTests(unittest.TestCase):
         self.assertIn("unreadable scoped file", result.stderr)
         self.assertNotIn(inaccessible_name, result.stderr)
 
+    def test_fails_closed_when_an_unreadable_scoped_directory_cannot_be_walked(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            inaccessible_directory = root / "unreadable-directory"
+            inaccessible_directory.mkdir()
+            inaccessible_directory.chmod(0)
+            try:
+                result = run_command(sys.executable, str(SCANNER), str(root))
+            finally:
+                inaccessible_directory.chmod(0o700)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unreadable scoped file", result.stderr)
+        self.assertNotIn(inaccessible_directory.name, result.stderr)
+
 
 class WorkflowPinTests(unittest.TestCase):
     def test_ci_uses_the_verified_checkout_commit_and_keeps_read_only_permissions(self) -> None:
