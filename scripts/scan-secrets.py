@@ -28,16 +28,32 @@ IGNORED_DIRECTORIES = {".git", ".codegraph", "__pycache__"}
 
 
 def iter_files(root: Path):
-    for path in root.rglob("*"):
-        if any(part in IGNORED_DIRECTORIES for part in path.parts):
-            continue
-        if path.is_file():
-            yield path
+    directories = [root]
+    while directories:
+        directory = directories.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if entry.name in IGNORED_DIRECTORIES:
+                        continue
+                    path = Path(entry.path)
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            directories.append(path)
+                        elif entry.is_file(follow_symlinks=False):
+                            yield path
+                    except OSError:
+                        yield None
+        except OSError:
+            yield None
 
 
 def scan(root: Path) -> list[str]:
     findings: list[str] = []
     for path in iter_files(root):
+        if path is None:
+            findings.append("unreadable scoped file")
+            continue
         try:
             relative_path = os.fsencode(path.relative_to(root))
             content = path.read_bytes()
