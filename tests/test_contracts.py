@@ -18,6 +18,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 VALIDATOR = REPOSITORY / "scripts" / "validate-v2-contract.py"
 SCANNER = REPOSITORY / "scripts" / "scan-secrets.py"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "ci.yml"
+COMPOSE = REPOSITORY / "docker-compose.yml"
 COMPOSE_CONTRACT = REPOSITORY / "tests" / "compose-contract.sh"
 COMPOSE_VALIDATOR = REPOSITORY / "tests" / "compose-contract.py"
 COMPOSE_CI_ENV = REPOSITORY / "tests" / "compose-ci.env"
@@ -33,22 +34,12 @@ def valid_config() -> dict[str, object]:
                 "name": "CLIProxy",
                 "env": ["CLIPROXY_API_KEY"],
                 "package": "@opencode/ai/providers/openai-compatible",
-                "settings": {
-                    "baseURL": "https://cliproxy.hangocthanh.io.vn/v1",
-                    "apiKey": "{env:CLIPROXY_API_KEY}",
-                },
-                "models": {
-                    "deepseek-v4-flash": {
-                        "name": "DeepSeek V4 Flash",
-                        "modelID": "deepseek-v4-flash",
-                    },
-                },
+                "settings": {"baseURL": "https://cliproxy.hangocthanh.io.vn/v1", "apiKey": "{env:CLIPROXY_API_KEY}"},
+                "models": {"deepseek-v4-flash": {"name": "DeepSeek V4 Flash", "modelID": "deepseek-v4-flash"}},
             },
         },
         "model": "cliproxy/deepseek-v4-flash",
-        "permissions": [
-            {"action": "*", "resource": "*", "effect": "allow"},
-        ],
+        "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
     }
 
 
@@ -93,11 +84,7 @@ class V2ContractValidatorTests(unittest.TestCase):
 
     def test_requires_the_cliproxy_openai_compatible_provider_contract(self) -> None:
         cases = {
-            "missing": {
-                "$schema": "https://opencode.ai/config.json",
-                "providers": {},
-                "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
-            },
+            "missing": {"$schema": "https://opencode.ai/config.json", "providers": {}, "permissions": [{"action": "*", "resource": "*", "effect": "allow"}]},
             "wrong_package": valid_cliproxy_config(),
             "wrong_base_url": valid_cliproxy_config(),
             "missing_api_key_template": valid_cliproxy_config(),
@@ -163,29 +150,21 @@ class V2ContractValidatorTests(unittest.TestCase):
         for field, value in (("action", 1), ("resource", []), ("effect", None)):
             with self.subTest(field=field):
                 config = valid_config()
-                config["permissions"] = [
-                    {"action": "*", "resource": "*", "effect": "allow"},
-                    {"action": "read", "resource": "*", "effect": "allow", field: value},
-                ]
+                config["permissions"] = [{"action": "*", "resource": "*", "effect": "allow"}, {"action": "read", "resource": "*", "effect": "allow", field: value}]
                 result = self.validate(config)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"field '{field}' must be a string", result.stderr)
 
     def test_rejects_v1_bash_permission_action(self) -> None:
         config = valid_config()
-        config["permissions"] = [
-            {"action": "bash", "resource": "*", "effect": "allow"},
-            {"action": "*", "resource": "*", "effect": "allow"},
-        ]
+        config["permissions"] = [{"action": "bash", "resource": "*", "effect": "allow"}, {"action": "*", "resource": "*", "effect": "allow"}]
         result = self.validate(config)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("action 'bash' is invalid", result.stderr)
 
     def test_rejects_permissions_without_the_wildcard_allow_rule(self) -> None:
         config = valid_config()
-        config["permissions"] = [
-            {"action": "read", "resource": "*", "effect": "allow"},
-        ]
+        config["permissions"] = [{"action": "read", "resource": "*", "effect": "allow"}]
         result = self.validate(config)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("wildcard allow permission is required", result.stderr)
@@ -222,10 +201,10 @@ class SecretScannerTests(unittest.TestCase):
             file_path = root / "github-fine-grained.txt"
             file_path.write_text(fine_grained, encoding="utf-8")
             result = run_command(sys.executable, str(SCANNER), str(root))
-        self.assertNotEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fine-grained GitHub token", result.stderr)
-        self.assertNotIn(fine_grained, result.stderr)
-        self.assertNotIn(file_path.name, result.stderr)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertIn("fine-grained GitHub token", result.stderr)
+            self.assertNotIn(fine_grained, result.stderr)
+            self.assertNotIn(file_path.name, result.stderr)
 
     def test_detects_tailscale_auth_keys_retained_from_the_baseline_scanner(self) -> None:
         with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
@@ -448,26 +427,17 @@ class RuntimeComposeContractTests(unittest.TestCase):
             "services": {
                 "ts-opencode2": {
                     "image": "tailscale/tailscale:v1.104.4",
-                    "environment": {
-                        "TS_AUTHKEY": "ci-placeholder-ts-authkey",
-                        "TS_STATE_DIR": "/var/lib/tailscale",
-                        "TS_USERSPACE": "false",
-                    },
+                    "environment": {"TS_AUTHKEY": "ci-placeholder-ts-authkey", "TS_STATE_DIR": "/var/lib/tailscale", "TS_USERSPACE": "false"},
                     "devices": ["/dev/net/tun:/dev/net/tun:rwm"],
                     "cap_add": ["NET_ADMIN"],
-                    "volumes": [
-                        {"type": "volume", "source": "opencode2_tailscale_state", "target": "/var/lib/tailscale"},
-                    ],
+                    "volumes": [{"type": "volume", "source": "opencode2_tailscale_state", "target": "/var/lib/tailscale"}],
                     "networks": {"edge": None},
                 },
                 "opencode2": {
                     "image": "ghcr.io/anomalyco/opencode:2.0.32",
                     "command": ["serve", "--hostname", "0.0.0.0", "--port", "4096"],
                     "network_mode": "service:ts-opencode2",
-                    "environment": {
-                        "OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password",
-                        "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc",
-                    },
+                    "environment": {"OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password", "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc"},
                     "volumes": [
                         {"type": "volume", "source": "opencode2_workspace", "target": "/workspace/projects"},
                         {"type": "volume", "source": "opencode2_state", "target": "/root"},
@@ -488,6 +458,12 @@ class RuntimeComposeContractTests(unittest.TestCase):
 
     def test_accepts_effective_rendered_compose_contract(self) -> None:
         result = self.validate_rendered_compose(self.valid_rendered_compose())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_accepts_compose_normalized_sidecar_network_mode(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["network_mode"] = "service:opencode2-ts-opencode2"  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_missing_rendered_isolation_volume_config_healthcheck_or_secret(self) -> None:

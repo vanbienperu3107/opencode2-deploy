@@ -52,7 +52,7 @@ def validate(compose: dict[str, object]) -> None:
         fail("sidecar image must be pinned")
     if app.get("image") != "ghcr.io/anomalyco/opencode:2.0.32":
         fail("application image must be pinned")
-    if app.get("network_mode") != "service:ts-opencode2":
+    if app.get("network_mode") not in ("service:ts-opencode2", "service:opencode2-ts-opencode2"):
         fail("application must share only the sidecar network namespace")
     if any(field in app for field in ("ports", "devices", "cap_add", "privileged", "networks")):
         fail("application must not receive ports, devices, capabilities, privileged mode, or a separate network")
