@@ -1,4 +1,63 @@
 services:
+  ts-opencode2:
+    image: tailscale/tailscale:v1.104.4
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_EXTRA_ARGS: --login-server=https://vpn2.hangocthanh.io.vn --hostname=opencode2 --accept-dns=false
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - opencode2_tailscale_state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - edge
+
   opencode2:
     image: ghcr.io/anomalyco/opencode:2.0.32
-    profiles: [runtime]
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - ts-opencode2
+    network_mode: service:ts-opencode2
+    working_dir: /workspace/projects
+    environment:
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:-}
+    volumes:
+      - opencode2_workspace:/workspace/projects
+      - opencode2_state:/root
+    configs:
+      - source: opencode-config
+        target: /etc/opencode/opencode.jsonc
+        mode: 0444
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --user=\"$$OPENCODE_SERVER_USERNAME\" --password=\"$$OPENCODE_SERVER_PASSWORD\" http://127.0.0.1:4096/global/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  opencode2_workspace:
+  opencode2_state:
+  opencode2_tailscale_state:
+
+configs:
+  opencode-config:
+    file: ./opencode.jsonc
+
+networks:
+  edge:
+    external: true

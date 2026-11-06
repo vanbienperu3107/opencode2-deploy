@@ -18,17 +18,33 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 VALIDATOR = REPOSITORY / "scripts" / "validate-v2-contract.py"
 SCANNER = REPOSITORY / "scripts" / "scan-secrets.py"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "ci.yml"
+COMPOSE = REPOSITORY / "docker-compose.yml"
+COMPOSE_CONTRACT = REPOSITORY / "tests" / "compose-contract.sh"
+CONFIG = REPOSITORY / "opencode.jsonc"
 CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
 
 
 def valid_config() -> dict[str, object]:
     return {
         "$schema": "https://opencode.ai/config.json",
-        "providers": {},
+        "providers": {
+            "cliproxy": {
+                "env": ["CLIPROXY_API_KEY"],
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {
+                    "baseURL": "https://cliproxy.hangocthanh.io.vn/v1",
+                    "apiKey": "{env:CLIPROXY_API_KEY}",
+                },
+            },
+        },
         "permissions": [
             {"action": "*", "resource": "*", "effect": "allow"},
         ],
     }
+
+
+def valid_cliproxy_config() -> dict[str, object]:
+    return valid_config()
 
 
 def run_command(*command: str) -> subprocess.CompletedProcess[str]:
@@ -63,8 +79,29 @@ class V2ContractValidatorTests(unittest.TestCase):
             return run_command(sys.executable, str(VALIDATOR), str(config_path))
 
     def test_accepts_only_the_required_v2_baseline_shape(self) -> None:
-        result = self.validate(valid_config())
+        result = self.validate(valid_cliproxy_config())
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_requires_the_cliproxy_openai_compatible_provider_contract(self) -> None:
+        cases = {
+            "missing": {
+                "$schema": "https://opencode.ai/config.json",
+                "providers": {},
+                "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
+            },
+            "wrong_package": valid_cliproxy_config(),
+            "wrong_base_url": valid_cliproxy_config(),
+            "missing_api_key_template": valid_cliproxy_config(),
+        }
+        cases["wrong_package"]["providers"]["cliproxy"]["package"] = "@ai-sdk/openai-compatible"  # type: ignore[index]
+        cases["wrong_base_url"]["providers"]["cliproxy"]["settings"]["baseURL"] = "https://example.invalid/v1"  # type: ignore[index]
+        del cases["missing_api_key_template"]["providers"]["cliproxy"]["settings"]["apiKey"]  # type: ignore[index]
+
+        for name, config in cases.items():
+            with self.subTest(name=name):
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("CLIProxy provider", result.stderr)
 
     def test_rejects_v1_provider_and_permission_fields(self) -> None:
         for field, value in (("provider", {}), ("permission", [])):
@@ -379,6 +416,48 @@ class WorkflowPinTests(unittest.TestCase):
         self.assertIn(f"actions/checkout@{CHECKOUT_SHA}", workflow)
         self.assertNotIn("actions/checkout@v4", workflow)
         self.assertIn("contents: read", workflow)
+
+
+class RuntimeComposeContractTests(unittest.TestCase):
+    def test_runtime_contract_script_is_versioned_and_runs_in_ci(self) -> None:
+        self.assertTrue(COMPOSE_CONTRACT.is_file())
+        script = COMPOSE_CONTRACT.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("docker compose --env-file .env.example config", script)
+        self.assertIn("bash tests/compose-contract.sh", workflow)
+
+    def test_compose_defines_an_isolated_tailnet_sidecar_and_application(self) -> None:
+        compose = COMPOSE.read_text(encoding="utf-8")
+        for expected in (
+            "  ts-opencode2:",
+            "image: tailscale/tailscale:v1.104.4",
+            "TS_STATE_DIR: /var/lib/tailscale",
+            "TS_USERSPACE: \"false\"",
+            "- /dev/net/tun",
+            "- NET_ADMIN",
+            "network_mode: service:ts-opencode2",
+            "command: [\"serve\", \"--hostname\", \"0.0.0.0\", \"--port\", \"4096\"]",
+            "opencode2_tailscale_state:",
+            "opencode2_workspace:",
+            "opencode2_state:",
+            "no-new-privileges:true",
+            "test: [\"CMD-SHELL\", \"wget -q -O /dev/null",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, compose)
+
+        application = compose.split("  opencode2:", maxsplit=1)[1]
+        self.assertNotIn("privileged:", application)
+        self.assertNotIn("cap_add:", application)
+        self.assertNotIn("devices:", application)
+        self.assertNotIn("ports:", application)
+        self.assertNotIn("docker.sock", application)
+
+    def test_committed_config_is_the_validated_cliproxy_v2_contract(self) -> None:
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
+        result = run_command(sys.executable, str(VALIDATOR), str(CONFIG))
+        self.assertEqual(config["providers"]["cliproxy"]["settings"]["baseURL"], "https://cliproxy.hangocthanh.io.vn/v1")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

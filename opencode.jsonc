@@ -1,6 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "providers": {},
+  "providers": {
+    "cliproxy": {
+      "env": ["CLIPROXY_API_KEY"],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://cliproxy.hangocthanh.io.vn/v1",
+        "apiKey": "{env:CLIPROXY_API_KEY}"
+      }
+    }
+  },
   "permissions": [
     { "action": "*", "resource": "*", "effect": "allow" }
   ]
