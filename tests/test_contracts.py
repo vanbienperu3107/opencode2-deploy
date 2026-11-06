@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -30,6 +33,26 @@ def valid_config() -> dict[str, object]:
 
 def run_command(*command: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def load_scanner_module():
+    specification = importlib.util.spec_from_file_location("scan_secrets", SCANNER)
+    if specification is None or specification.loader is None:
+        raise RuntimeError("cannot load secret scanner")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+class WithoutOpenFlag:
+    def __init__(self, wrapped, missing_flag: str) -> None:
+        self.wrapped = wrapped
+        self.missing_flag = missing_flag
+
+    def __getattr__(self, name: str):
+        if name == self.missing_flag:
+            raise AttributeError(name)
+        return getattr(self.wrapped, name)
 
 
 class V2ContractValidatorTests(unittest.TestCase):
@@ -117,6 +140,10 @@ class V2ContractValidatorTests(unittest.TestCase):
 
 
 class SecretScannerTests(unittest.TestCase):
+    @staticmethod
+    def github_token_sentinel(fill: str = "A") -> str:
+        return "gh" + "p_" + (fill * 24)
+
     def test_accepts_a_directory_without_secrets(self) -> None:
         with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
             root = Path(directory)
@@ -134,7 +161,9 @@ class SecretScannerTests(unittest.TestCase):
                 file_path.write_text(sentinel, encoding="utf-8")
                 result = run_command(sys.executable, str(SCANNER), str(root))
                 self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(str(file_path), result.stderr)
+                self.assertIn("GitHub token", result.stderr)
+                self.assertNotIn(sentinel, result.stderr)
+                self.assertNotIn(file_path.name, result.stderr)
                 file_path.unlink()
 
             fine_grained = "github" + "_pat_" + ("B" * 24)
@@ -142,7 +171,9 @@ class SecretScannerTests(unittest.TestCase):
             file_path.write_text(fine_grained, encoding="utf-8")
             result = run_command(sys.executable, str(SCANNER), str(root))
             self.assertNotEqual(result.returncode, 0, result.stderr)
-            self.assertIn(str(file_path), result.stderr)
+            self.assertIn("fine-grained GitHub token", result.stderr)
+            self.assertNotIn(fine_grained, result.stderr)
+            self.assertNotIn(file_path.name, result.stderr)
 
     def test_detects_tailscale_auth_keys_retained_from_the_baseline_scanner(self) -> None:
         with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
@@ -151,7 +182,7 @@ class SecretScannerTests(unittest.TestCase):
             file_path.write_text("TS" + "KEY-" + ("C" * 24), encoding="utf-8")
             result = run_command(sys.executable, str(SCANNER), str(root))
         self.assertNotEqual(result.returncode, 0, result.stderr)
-        self.assertIn(str(file_path), result.stderr)
+        self.assertIn("Tailscale auth key", result.stderr)
 
     def test_detects_generic_ec_openssh_and_rsa_private_key_headers(self) -> None:
         key_kinds = ("", "DSA", "EC", "OPENSSH", "RSA")
@@ -164,8 +195,182 @@ class SecretScannerTests(unittest.TestCase):
                 file_path.write_text(sentinel, encoding="utf-8")
                 result = run_command(sys.executable, str(SCANNER), str(root))
                 self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(str(file_path), result.stderr)
+                self.assertIn("private-key PEM header", result.stderr)
+                self.assertNotIn(file_path.name, result.stderr)
                 file_path.unlink()
+
+    def test_detects_a_token_embedded_in_non_utf8_binary_content(self) -> None:
+        sentinel = self.github_token_sentinel("B")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / "binary.dat"
+            file_path.write_bytes(b"\xff\x00" + sentinel.encode("ascii") + b"\x80")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GitHub token", result.stderr)
+        self.assertNotIn(sentinel, result.stderr)
+
+    def test_rejects_a_filename_containing_a_token_without_disclosing_it(self) -> None:
+        sentinel = self.github_token_sentinel("C")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / f"artifact-{sentinel}.txt"
+            file_path.write_text("public content\n", encoding="utf-8")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(sentinel, result.stdout)
+        self.assertNotIn(sentinel, result.stderr)
+        self.assertNotIn(file_path.name, result.stderr)
+
+    def test_stderr_redacts_sentinels_from_both_path_and_binary_content(self) -> None:
+        path_sentinel = self.github_token_sentinel("D")
+        content_sentinel = self.github_token_sentinel("E")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / f"artifact-{path_sentinel}.dat"
+            file_path.write_bytes(b"\xfe" + content_sentinel.encode("ascii"))
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GitHub token", result.stderr)
+        self.assertNotIn(path_sentinel, result.stdout + result.stderr)
+        self.assertNotIn(content_sentinel, result.stdout + result.stderr)
+
+    def test_fails_closed_without_disclosing_unreadable_file_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            inaccessible_name = "unreadable-file.txt"
+            file_path = root / inaccessible_name
+            file_path.write_text("public content\n", encoding="utf-8")
+            file_path.chmod(0)
+            try:
+                result = run_command(sys.executable, str(SCANNER), str(root))
+            finally:
+                file_path.chmod(0o600)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unreadable scoped file", result.stderr)
+        self.assertNotIn(inaccessible_name, result.stderr)
+
+    def test_fails_closed_when_an_unreadable_scoped_directory_cannot_be_walked(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            inaccessible_directory = root / "unreadable-directory"
+            inaccessible_directory.mkdir()
+            inaccessible_directory.chmod(0)
+            try:
+                result = run_command(sys.executable, str(SCANNER), str(root))
+            finally:
+                inaccessible_directory.chmod(0o700)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unreadable scoped file", result.stderr)
+        self.assertNotIn(inaccessible_directory.name, result.stderr)
+
+    def test_fails_closed_and_redacts_an_in_root_file_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("F")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            target = root / "safe-target.txt"
+            target.write_text("public content\n", encoding="utf-8")
+            symlink_name = f"alias-{sentinel}"
+            (root / symlink_name).symlink_to(target.name)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_a_symlinked_scan_root(self) -> None:
+        sentinel = self.github_token_sentinel("J")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            parent = Path(directory)
+            target = parent / "safe-root"
+            target.mkdir()
+            symlink_name = f"root-alias-{sentinel}"
+            root = parent / symlink_name
+            root.symlink_to(target.name, target_is_directory=True)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_a_broken_scoped_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("G")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            symlink_name = f"broken-{sentinel}"
+            (root / symlink_name).symlink_to("missing-target")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_an_in_root_directory_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("H")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            target = root / "safe-directory"
+            target.mkdir()
+            (target / "safe.txt").write_text("public content\n", encoding="utf-8")
+            symlink_name = f"directory-alias-{sentinel}"
+            (root / symlink_name).symlink_to(target.name, target_is_directory=True)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_when_a_file_becomes_a_symlink_between_stat_and_open(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("I")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            raced_file = root / "race.txt"
+            raced_file.write_text("public content\n", encoding="utf-8")
+            target = root / "target.txt"
+            target.write_text(sentinel, encoding="utf-8")
+            original_open = scanner.os.open
+            replaced = False
+
+            def replace_before_file_open(path, flags, mode=0o777, *, dir_fd=None):
+                nonlocal replaced
+                if path == raced_file.name and dir_fd is not None and not replaced:
+                    replaced = True
+                    raced_file.unlink()
+                    raced_file.symlink_to(target.name)
+                return original_open(path, flags, mode, dir_fd=dir_fd)
+
+            with mock.patch.object(scanner.os, "open", side_effect=replace_before_file_open):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertTrue(replaced)
+        self.assertIn("unsafe scoped symlink", rendered)
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn(raced_file.name, rendered)
+
+    def test_fails_closed_and_redacts_when_no_follow_is_unavailable(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("K")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            (root / f"clean-{sentinel}.txt").write_text("public content\n", encoding="utf-8")
+            with mock.patch.object(scanner, "os", WithoutOpenFlag(os, "O_NOFOLLOW")):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertIn("unsafe scoped file", rendered)
+        self.assertNotIn(sentinel, rendered)
+
+    def test_fails_closed_and_redacts_when_directory_flag_is_unavailable(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("L")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            (root / f"clean-{sentinel}").mkdir()
+            with mock.patch.object(scanner, "os", WithoutOpenFlag(os, "O_DIRECTORY")):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertIn("unsafe scoped file", rendered)
+        self.assertNotIn(sentinel, rendered)
 
 
 class WorkflowPinTests(unittest.TestCase):
