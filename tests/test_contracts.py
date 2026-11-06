@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -30,6 +33,15 @@ def valid_config() -> dict[str, object]:
 
 def run_command(*command: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def load_scanner_module():
+    specification = importlib.util.spec_from_file_location("scan_secrets", SCANNER)
+    if specification is None or specification.loader is None:
+        raise RuntimeError("cannot load secret scanner")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
 
 
 class V2ContractValidatorTests(unittest.TestCase):
@@ -240,6 +252,94 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("unreadable scoped file", result.stderr)
         self.assertNotIn(inaccessible_directory.name, result.stderr)
+
+    def test_fails_closed_and_redacts_an_in_root_file_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("F")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            target = root / "safe-target.txt"
+            target.write_text("public content\n", encoding="utf-8")
+            symlink_name = f"alias-{sentinel}"
+            (root / symlink_name).symlink_to(target.name)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_a_symlinked_scan_root(self) -> None:
+        sentinel = self.github_token_sentinel("J")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            parent = Path(directory)
+            target = parent / "safe-root"
+            target.mkdir()
+            symlink_name = f"root-alias-{sentinel}"
+            root = parent / symlink_name
+            root.symlink_to(target.name, target_is_directory=True)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_a_broken_scoped_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("G")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            symlink_name = f"broken-{sentinel}"
+            (root / symlink_name).symlink_to("missing-target")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    def test_fails_closed_and_redacts_an_in_root_directory_symlink(self) -> None:
+        sentinel = self.github_token_sentinel("H")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            target = root / "safe-directory"
+            target.mkdir()
+            (target / "safe.txt").write_text("public content\n", encoding="utf-8")
+            symlink_name = f"directory-alias-{sentinel}"
+            (root / symlink_name).symlink_to(target.name, target_is_directory=True)
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsafe scoped symlink", result.stderr)
+        self.assertNotIn(sentinel, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+
+    @unittest.skipUnless(
+        hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+        "platform lacks no-follow descriptor operations",
+    )
+    def test_fails_closed_when_a_file_becomes_a_symlink_between_stat_and_open(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("I")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            raced_file = root / "race.txt"
+            raced_file.write_text("public content\n", encoding="utf-8")
+            target = root / "target.txt"
+            target.write_text(sentinel, encoding="utf-8")
+            original_open = scanner.os.open
+            replaced = False
+
+            def replace_before_file_open(path, flags, mode=0o777, *, dir_fd=None):
+                nonlocal replaced
+                if path == raced_file.name and dir_fd is not None and not replaced:
+                    replaced = True
+                    raced_file.unlink()
+                    raced_file.symlink_to(target.name)
+                return original_open(path, flags, mode, dir_fd=dir_fd)
+
+            with mock.patch.object(scanner.os, "open", side_effect=replace_before_file_open):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertTrue(replaced)
+        self.assertIn("unsafe scoped symlink", rendered)
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn(raced_file.name, rendered)
 
 
 class WorkflowPinTests(unittest.TestCase):
