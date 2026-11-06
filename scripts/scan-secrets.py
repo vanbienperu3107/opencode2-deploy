@@ -31,6 +31,13 @@ UNSAFE_SCOPED_FILE = "unsafe scoped file"
 UNSAFE_SCOPED_SYMLINK = "unsafe scoped symlink"
 
 
+def safe_open_flags(*, directory: bool = False) -> tuple[int | None, str | None]:
+    try:
+        return nofollow_flags(directory=directory), None
+    except OSError:
+        return None, UNSAFE_SCOPED_FILE
+
+
 def nofollow_flags(*, directory: bool = False) -> int:
     if not hasattr(os, "O_NOFOLLOW"):
         raise OSError("platform cannot open scoped entries without following symlinks")
@@ -51,8 +58,12 @@ def finding_for_open_error(error: OSError) -> str:
 
 
 def scan_file(directory_fd: int, name: str) -> tuple[bytes | None, str | None]:
+    flags, flag_finding = safe_open_flags()
+    if flag_finding:
+        return None, flag_finding
+    assert flags is not None
     try:
-        file_fd = os.open(name, nofollow_flags(), dir_fd=directory_fd)
+        file_fd = os.open(name, flags, dir_fd=directory_fd)
     except OSError as error:
         return None, finding_for_open_error(error)
     try:
@@ -88,8 +99,13 @@ def scan_directory(directory_fd: int) -> list[str]:
         if name in IGNORED_DIRECTORIES:
             continue
         if stat.S_ISDIR(entry_stat.st_mode):
+            flags, flag_finding = safe_open_flags(directory=True)
+            if flag_finding:
+                findings.append(flag_finding)
+                continue
+            assert flags is not None
             try:
-                child_fd = os.open(name, nofollow_flags(directory=True), dir_fd=directory_fd)
+                child_fd = os.open(name, flags, dir_fd=directory_fd)
             except OSError as error:
                 findings.append(finding_for_open_error(error))
                 continue
@@ -118,8 +134,12 @@ def scan_directory(directory_fd: int) -> list[str]:
 
 
 def scan(root: Path) -> list[str]:
+    flags, flag_finding = safe_open_flags(directory=True)
+    if flag_finding:
+        return [flag_finding]
+    assert flags is not None
     try:
-        root_fd = os.open(root, nofollow_flags(directory=True))
+        root_fd = os.open(root, flags)
     except OSError as error:
         return [finding_for_open_error(error)]
     try:

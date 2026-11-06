@@ -44,6 +44,17 @@ def load_scanner_module():
     return module
 
 
+class WithoutOpenFlag:
+    def __init__(self, wrapped, missing_flag: str) -> None:
+        self.wrapped = wrapped
+        self.missing_flag = missing_flag
+
+    def __getattr__(self, name: str):
+        if name == self.missing_flag:
+            raise AttributeError(name)
+        return getattr(self.wrapped, name)
+
+
 class V2ContractValidatorTests(unittest.TestCase):
     def validate(self, config: dict[str, object]) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory(prefix="opencode2-v2-config-", dir="/tmp") as directory:
@@ -309,10 +320,6 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotIn(sentinel, result.stdout + result.stderr)
         self.assertNotIn(symlink_name, result.stdout + result.stderr)
 
-    @unittest.skipUnless(
-        hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
-        "platform lacks no-follow descriptor operations",
-    )
     def test_fails_closed_when_a_file_becomes_a_symlink_between_stat_and_open(self) -> None:
         scanner = load_scanner_module()
         sentinel = self.github_token_sentinel("I")
@@ -340,6 +347,30 @@ class SecretScannerTests(unittest.TestCase):
         self.assertIn("unsafe scoped symlink", rendered)
         self.assertNotIn(sentinel, rendered)
         self.assertNotIn(raced_file.name, rendered)
+
+    def test_fails_closed_and_redacts_when_no_follow_is_unavailable(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("K")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            (root / f"clean-{sentinel}.txt").write_text("public content\n", encoding="utf-8")
+            with mock.patch.object(scanner, "os", WithoutOpenFlag(os, "O_NOFOLLOW")):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertIn("unsafe scoped file", rendered)
+        self.assertNotIn(sentinel, rendered)
+
+    def test_fails_closed_and_redacts_when_directory_flag_is_unavailable(self) -> None:
+        scanner = load_scanner_module()
+        sentinel = self.github_token_sentinel("L")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            (root / f"clean-{sentinel}").mkdir()
+            with mock.patch.object(scanner, "os", WithoutOpenFlag(os, "O_DIRECTORY")):
+                findings = scanner.scan(root)
+        rendered = "\n".join(findings)
+        self.assertIn("unsafe scoped file", rendered)
+        self.assertNotIn(sentinel, rendered)
 
 
 class WorkflowPinTests(unittest.TestCase):
