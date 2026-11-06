@@ -19,4 +19,6 @@ jobs:
       - name: Test runtime Compose contract
         run: bash tests/compose-contract.sh
       - name: Validate public baseline
-        run: bash tests/validate-config.sh
+        run: |
+          bash tests/validate-config.sh
+          bash tests/ssh-policy-contract.sh
