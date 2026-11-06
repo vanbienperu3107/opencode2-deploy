@@ -12,3 +12,6 @@ backups/
 
 # Python test bytecode.
 __pycache__/
+
+# Local CodeGraph index.
+/.codegraph/
