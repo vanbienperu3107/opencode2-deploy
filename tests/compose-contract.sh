@@ -20,6 +20,7 @@ grep -Fq 'opencode2_tailscale_state:/var/lib/tailscale' docker-compose.yml
 grep -Fq 'opencode2_workspace:/workspace/projects' docker-compose.yml
 grep -Fq 'opencode2_state:/root' docker-compose.yml
 grep -Fq 'target: /etc/opencode/opencode.jsonc' docker-compose.yml
+grep -Fq 'OPENCODE_CONFIG: /etc/opencode/opencode.jsonc' docker-compose.yml
 grep -Fq 'no-new-privileges:true' docker-compose.yml
 grep -Fq '/global/health' docker-compose.yml
 
