@@ -29,8 +29,9 @@ with `latest`.
   and `opencode2_tailscale_state` (`/var/lib/tailscale`). Never remove them
   during a restart, update, or rollback.
 - The committed config is delivered as a read-only Compose config at
-  `/etc/opencode/opencode.jsonc`, not a host bind mount. It defines only the
-  V2 OpenAI-compatible CLIProxy provider at
+  `/etc/opencode/opencode.jsonc` and selected explicitly with
+  `OPENCODE_CONFIG`, not a host bind mount. It defines only the V2
+  OpenAI-compatible CLIProxy provider at
   `https://cliproxy.hangocthanh.io.vn/v1` and the required wildcard allow rule.
 
 ### Official image verification
