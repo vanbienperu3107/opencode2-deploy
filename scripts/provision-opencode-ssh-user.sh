@@ -4,41 +4,14 @@ set -euo pipefail
 
 readonly account_name='opencode'
 
-validate_existing_account() {
-  local account_record=$1
-  local account_home account_shell account_uid account_primary_gid account_group_ids account_group_names group_id
-
-  account_home=$(printf '%s\n' "$account_record" | awk -F: 'NR == 1 { print $6 }')
-  account_shell=$(printf '%s\n' "$account_record" | awk -F: 'NR == 1 { print $7 }')
-  account_uid=$(id -u "$account_name")
-  account_primary_gid=$(id -g "$account_name")
-  account_group_ids=$(id -G "$account_name")
-  account_group_names=$(id -nG "$account_name")
-
-  test "$account_uid" != '0' || fail 'opencode must not be root'
-  test -n "$account_home" || fail 'could not determine opencode home directory'
-  test -d "$account_home" || fail "expected account home does not exist: $account_home"
-  case "$account_shell" in
-    /usr/sbin/nologin|/sbin/nologin|/bin/false) fail 'opencode must retain an SSH-capable login shell' ;;
-  esac
-  for group_id in $account_group_ids; do
-    test "$group_id" = "$account_primary_gid" || fail 'opencode must not have supplementary groups'
-  done
-  case " $account_group_names " in
-    *' sudo '*|*' wheel '*|*' docker '*) fail 'opencode must not belong to sudo, wheel, or docker' ;;
-  esac
-  if runuser -u "$account_name" -- sudo -n true >/dev/null 2>&1; then
-    fail 'opencode must not have passwordless sudo'
-  fi
-}
-
 usage() {
   cat <<'EOF'
 Usage: provision-opencode-ssh-user.sh --public-key-file PATH
 
 Run locally on an approved target node as root. The file must contain one
-Ed25519 public key. The script creates or repairs the dedicated non-root
-`opencode` account, installs that key once, and rejects unsafe SSH overrides.
+Ed25519 public key. The script creates the dedicated non-root `opencode`
+account only when no account with that name exists. It refuses existing
+accounts before any mutation and rejects unsafe SSH overrides.
 EOF
 }
 
@@ -106,12 +79,12 @@ case "$key_type" in
 esac
 printf '%s\n' "$public_key" | ssh-keygen -lf - >/dev/null 2>&1 || fail 'public key is invalid'
 
-if ! getent passwd "$account_name" >/dev/null; then
-  useradd --create-home --user-group --shell /bin/bash "$account_name"
+if getent passwd "$account_name" >/dev/null; then
+  fail 'refusing to modify an existing opencode account'
 fi
 
+useradd --create-home --user-group --shell /bin/bash "$account_name"
 account_record=$(getent passwd "$account_name")
-validate_existing_account "$account_record"
 account_home=$(printf '%s\n' "$account_record" | awk -F: 'NR == 1 { print $6 }')
 passwd --lock "$account_name" >/dev/null
 install -d -m 0700 -o "$account_name" -g "$account_name" "$account_home/.ssh"
