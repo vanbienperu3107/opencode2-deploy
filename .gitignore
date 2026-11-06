@@ -1,0 +1,14 @@
+# Runtime secrets are supplied outside version control.
+.env
+.env.*
+!.env.example
+secrets/
+
+# Generated runtime diagnostics and recovery material.
+*.log
+logs/
+backups/
+*.bak
+
+# Python test bytecode.
+__pycache__/

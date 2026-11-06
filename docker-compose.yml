@@ -1,0 +1,4 @@
+services:
+  opencode2:
+    image: ghcr.io/anomalyco/opencode:2.0.32
+    profiles: [runtime]

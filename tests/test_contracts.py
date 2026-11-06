@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Executable negative tests for the public deployment contracts."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPOSITORY = Path(__file__).resolve().parents[1]
+VALIDATOR = REPOSITORY / "scripts" / "validate-v2-contract.py"
+SCANNER = REPOSITORY / "scripts" / "scan-secrets.py"
+WORKFLOW = REPOSITORY / ".github" / "workflows" / "ci.yml"
+CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
+
+
+def valid_config() -> dict[str, object]:
+    return {
+        "$schema": "https://opencode.ai/config.json",
+        "providers": {},
+        "permissions": [
+            {"action": "*", "resource": "*", "effect": "allow"},
+        ],
+    }
+
+
+def run_command(*command: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+class V2ContractValidatorTests(unittest.TestCase):
+    def validate(self, config: dict[str, object]) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory(prefix="opencode2-v2-config-", dir="/tmp") as directory:
+            config_path = Path(directory) / "opencode.jsonc"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            return run_command(sys.executable, str(VALIDATOR), str(config_path))
+
+    def test_accepts_only_the_required_v2_baseline_shape(self) -> None:
+        result = self.validate(valid_config())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_v1_provider_and_permission_fields(self) -> None:
+        for field, value in (("provider", {}), ("permission", [])):
+            with self.subTest(field=field):
+                config = valid_config()
+                config[field] = value
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"V1 field '{field}'", result.stderr)
+
+    def test_rejects_non_object_providers(self) -> None:
+        for providers in ([], "cliproxy", None):
+            with self.subTest(providers=providers):
+                config = valid_config()
+                config["providers"] = providers
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("'providers' must be an object", result.stderr)
+
+    def test_rejects_non_object_provider_entries(self) -> None:
+        config = valid_config()
+        config["providers"] = {"cliproxy": []}
+        result = self.validate(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("provider 'cliproxy' must be an object", result.stderr)
+
+    def test_rejects_non_array_permissions(self) -> None:
+        for permissions in ({}, "allow", None):
+            with self.subTest(permissions=permissions):
+                config = valid_config()
+                config["permissions"] = permissions
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("'permissions' must be an array", result.stderr)
+
+    def test_rejects_non_object_permission_entries(self) -> None:
+        config = valid_config()
+        config["permissions"] = ["allow"]
+        result = self.validate(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("permission at index 0 must be an object", result.stderr)
+
+    def test_rejects_permission_fields_with_wrong_types(self) -> None:
+        for field, value in (("action", 1), ("resource", []), ("effect", None)):
+            with self.subTest(field=field):
+                config = valid_config()
+                config["permissions"] = [
+                    {"action": "*", "resource": "*", "effect": "allow"},
+                    {"action": "read", "resource": "*", "effect": "allow", field: value},
+                ]
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"field '{field}' must be a string", result.stderr)
+
+    def test_rejects_v1_bash_permission_action(self) -> None:
+        config = valid_config()
+        config["permissions"] = [
+            {"action": "bash", "resource": "*", "effect": "allow"},
+            {"action": "*", "resource": "*", "effect": "allow"},
+        ]
+        result = self.validate(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("action 'bash' is invalid", result.stderr)
+
+    def test_rejects_permissions_without_the_wildcard_allow_rule(self) -> None:
+        config = valid_config()
+        config["permissions"] = [
+            {"action": "read", "resource": "*", "effect": "allow"},
+        ]
+        result = self.validate(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("wildcard allow permission is required", result.stderr)
+
+
+class SecretScannerTests(unittest.TestCase):
+    def test_accepts_a_directory_without_secrets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            (root / "safe.txt").write_text("public configuration only\n", encoding="utf-8")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_detects_all_standard_github_token_prefixes(self) -> None:
+        prefixes = ("p", "o", "u", "s", "r")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            for prefix in prefixes:
+                sentinel = "gh" + prefix + "_" + ("A" * 24)
+                file_path = root / f"github-{prefix}.txt"
+                file_path.write_text(sentinel, encoding="utf-8")
+                result = run_command(sys.executable, str(SCANNER), str(root))
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn(str(file_path), result.stderr)
+                file_path.unlink()
+
+            fine_grained = "github" + "_pat_" + ("B" * 24)
+            file_path = root / "github-fine-grained.txt"
+            file_path.write_text(fine_grained, encoding="utf-8")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertIn(str(file_path), result.stderr)
+
+    def test_detects_tailscale_auth_keys_retained_from_the_baseline_scanner(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / "tailscale-auth-key.txt"
+            file_path.write_text("TS" + "KEY-" + ("C" * 24), encoding="utf-8")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(file_path), result.stderr)
+
+    def test_detects_generic_ec_openssh_and_rsa_private_key_headers(self) -> None:
+        key_kinds = ("", "DSA", "EC", "OPENSSH", "RSA")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            for kind in key_kinds:
+                qualifier = f"{kind} " if kind else ""
+                sentinel = "-----BEGIN " + qualifier + "PRIVATE KEY-----"
+                file_path = root / f"private-key-{kind or 'generic'}.txt"
+                file_path.write_text(sentinel, encoding="utf-8")
+                result = run_command(sys.executable, str(SCANNER), str(root))
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn(str(file_path), result.stderr)
+                file_path.unlink()
+
+
+class WorkflowPinTests(unittest.TestCase):
+    def test_ci_uses_the_verified_checkout_commit_and_keeps_read_only_permissions(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(f"actions/checkout@{CHECKOUT_SHA}", workflow)
+        self.assertNotIn("actions/checkout@v4", workflow)
+        self.assertIn("contents: read", workflow)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
