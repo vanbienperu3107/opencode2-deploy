@@ -117,6 +117,10 @@ class V2ContractValidatorTests(unittest.TestCase):
 
 
 class SecretScannerTests(unittest.TestCase):
+    @staticmethod
+    def github_token_sentinel(fill: str = "A") -> str:
+        return "gh" + "p_" + (fill * 24)
+
     def test_accepts_a_directory_without_secrets(self) -> None:
         with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
             root = Path(directory)
@@ -134,7 +138,9 @@ class SecretScannerTests(unittest.TestCase):
                 file_path.write_text(sentinel, encoding="utf-8")
                 result = run_command(sys.executable, str(SCANNER), str(root))
                 self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(str(file_path), result.stderr)
+                self.assertIn("GitHub token", result.stderr)
+                self.assertNotIn(sentinel, result.stderr)
+                self.assertNotIn(file_path.name, result.stderr)
                 file_path.unlink()
 
             fine_grained = "github" + "_pat_" + ("B" * 24)
@@ -142,7 +148,9 @@ class SecretScannerTests(unittest.TestCase):
             file_path.write_text(fine_grained, encoding="utf-8")
             result = run_command(sys.executable, str(SCANNER), str(root))
             self.assertNotEqual(result.returncode, 0, result.stderr)
-            self.assertIn(str(file_path), result.stderr)
+            self.assertIn("fine-grained GitHub token", result.stderr)
+            self.assertNotIn(fine_grained, result.stderr)
+            self.assertNotIn(file_path.name, result.stderr)
 
     def test_detects_tailscale_auth_keys_retained_from_the_baseline_scanner(self) -> None:
         with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
@@ -151,7 +159,7 @@ class SecretScannerTests(unittest.TestCase):
             file_path.write_text("TS" + "KEY-" + ("C" * 24), encoding="utf-8")
             result = run_command(sys.executable, str(SCANNER), str(root))
         self.assertNotEqual(result.returncode, 0, result.stderr)
-        self.assertIn(str(file_path), result.stderr)
+        self.assertIn("Tailscale auth key", result.stderr)
 
     def test_detects_generic_ec_openssh_and_rsa_private_key_headers(self) -> None:
         key_kinds = ("", "DSA", "EC", "OPENSSH", "RSA")
@@ -164,8 +172,60 @@ class SecretScannerTests(unittest.TestCase):
                 file_path.write_text(sentinel, encoding="utf-8")
                 result = run_command(sys.executable, str(SCANNER), str(root))
                 self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(str(file_path), result.stderr)
+                self.assertIn("private-key PEM header", result.stderr)
+                self.assertNotIn(file_path.name, result.stderr)
                 file_path.unlink()
+
+    def test_detects_a_token_embedded_in_non_utf8_binary_content(self) -> None:
+        sentinel = self.github_token_sentinel("B")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / "binary.dat"
+            file_path.write_bytes(b"\xff\x00" + sentinel.encode("ascii") + b"\x80")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GitHub token", result.stderr)
+        self.assertNotIn(sentinel, result.stderr)
+
+    def test_rejects_a_filename_containing_a_token_without_disclosing_it(self) -> None:
+        sentinel = self.github_token_sentinel("C")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / f"artifact-{sentinel}.txt"
+            file_path.write_text("public content\n", encoding="utf-8")
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(sentinel, result.stdout)
+        self.assertNotIn(sentinel, result.stderr)
+        self.assertNotIn(file_path.name, result.stderr)
+
+    def test_stderr_redacts_sentinels_from_both_path_and_binary_content(self) -> None:
+        path_sentinel = self.github_token_sentinel("D")
+        content_sentinel = self.github_token_sentinel("E")
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            file_path = root / f"artifact-{path_sentinel}.dat"
+            file_path.write_bytes(b"\xfe" + content_sentinel.encode("ascii"))
+            result = run_command(sys.executable, str(SCANNER), str(root))
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GitHub token", result.stderr)
+        self.assertNotIn(path_sentinel, result.stdout + result.stderr)
+        self.assertNotIn(content_sentinel, result.stdout + result.stderr)
+
+    def test_fails_closed_without_disclosing_unreadable_file_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="opencode2-secret-sentinels-", dir="/tmp") as directory:
+            root = Path(directory)
+            inaccessible_name = "unreadable-file.txt"
+            file_path = root / inaccessible_name
+            file_path.write_text("public content\n", encoding="utf-8")
+            file_path.chmod(0)
+            try:
+                result = run_command(sys.executable, str(SCANNER), str(root))
+            finally:
+                file_path.chmod(0o600)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unreadable scoped file", result.stderr)
+        self.assertNotIn(inaccessible_name, result.stderr)
 
 
 class WorkflowPinTests(unittest.TestCase):
