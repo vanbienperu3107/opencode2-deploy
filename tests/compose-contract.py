@@ -68,8 +68,10 @@ def validate(compose: dict[str, object]) -> None:
     devices = sidecar.get("devices")
     if not isinstance(devices, list) or not any(
         isinstance(device, dict)
-        and device.get("source") == "/dev/net/tun"
-        and device.get("target") == "/dev/net/tun"
+        and (
+            device.get("path") == "/dev/net/tun"
+            or (device.get("source") == "/dev/net/tun" and device.get("target") == "/dev/net/tun")
+        )
         for device in devices
     ):
         fail("sidecar must receive the TUN device")
