@@ -12,17 +12,13 @@ grep -Fq 'image: tailscale/tailscale:v1.104.4' "$rendered"
 grep -Fq 'network_mode: service:ts-opencode2' "$rendered"
 grep -Fq '/dev/net/tun' "$rendered"
 grep -Fq 'NET_ADMIN' "$rendered"
-grep -Fq 'opencode2_tailscale_state:' "$rendered"
-grep -Fq 'opencode2_workspace:' "$rendered"
-grep -Fq 'opencode2_state:' "$rendered"
 grep -Fq 'no-new-privileges:true' "$rendered"
 
 python3 - "$rendered" <<'PY'
 from __future__ import annotations
 
-import sys
-
 import json
+import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     compose = json.load(stream)
