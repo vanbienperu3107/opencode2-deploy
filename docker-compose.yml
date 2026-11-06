@@ -31,6 +31,7 @@ services:
       OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-}
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
       CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:-}
+      OPENCODE_CONFIG: /etc/opencode/opencode.jsonc
     volumes:
       - opencode2_workspace:/workspace/projects
       - opencode2_state:/root
