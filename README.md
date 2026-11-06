@@ -93,10 +93,13 @@ sudo bash scripts/provision-opencode-ssh-user.sh \
   --public-key-file /secure/operator/opencode_tailnet.pub
 ```
 
-The script accepts exactly one valid `ssh-ed25519` public key, creates (or
-repairs) the non-root `opencode` account and private `.ssh` directory, adds the
-exact key once, and checks that the account cannot run non-interactive sudo or
-belong to `sudo`, `wheel`, or `docker`. It refuses blank, private, and
+The script accepts exactly one valid `ssh-ed25519` public key and creates the
+non-root `opencode` account and private `.ssh` directory only when that account
+does not already exist. It locks the new account's password before adding the
+exact key once. It **never repairs or provisions an existing `opencode` account**:
+when one exists, it fails before any mutation, including below that account's
+home directory. This also prevents `.ssh` or `authorized_keys` symlinks in an
+existing home from redirecting a root write. It refuses blank, private, and
 non-Ed25519 key input. It does not copy, print, or create a private key.
 
 Build the pinned known-hosts content from a reviewed, private inventory created

@@ -34,28 +34,20 @@ assert_invalid_hostname() {
   test ! -e "$output" || fail "unsafe hostname wrote output: $hostname"
 }
 
-assert_existing_account_refusal_preserves_authorized_keys() {
+assert_existing_account_refusal_has_no_side_effects() {
   local scenario=$1
-  local account_uid=$2
-  local account_shell=$3
-  local account_group_ids=$4
-  local account_group_names=$5
-  local passwordless_sudo=$6
+  local account_home=$2
 
-  printf 'existing-safe-key\n' >"$fake_home/opencode/.ssh/authorized_keys"
-  cp "$fake_home/opencode/.ssh/authorized_keys" "$test_root/authorized_keys.before"
+  : >"$fake_log"
+  touch "$test_root/fake-account"
   if PATH="$fake_bin:$PATH" \
-    FAKE_ACCOUNT_HOME="$fake_home/opencode" \
+    FAKE_ACCOUNT_HOME="$account_home" \
     FAKE_ACCOUNT_STATE="$test_root/fake-account" \
-    FAKE_ACCOUNT_UID="$account_uid" \
-    FAKE_ACCOUNT_SHELL="$account_shell" \
-    FAKE_GROUP_IDS="$account_group_ids" \
-    FAKE_GROUP_NAMES="$account_group_names" \
-    FAKE_PASSWORDLESS_SUDO="$passwordless_sudo" \
+    FAKE_MUTATION_LOG="$fake_log" \
     bash "$provision_script" --public-key-file "$test_root/test_key.pub" >/dev/null 2>&1; then
     fail "$scenario existing account was accepted"
   fi
-  cmp -s "$test_root/authorized_keys.before" "$fake_home/opencode/.ssh/authorized_keys" || fail "$scenario changed authorized_keys before refusal"
+  test ! -s "$fake_log" || fail "$scenario performed a root mutation before refusal"
 }
 
 test -f "$provision_script" || fail "missing provisioning script"
@@ -136,6 +128,7 @@ EOF
 cat >"$fake_bin/passwd" <<'EOF'
 #!/usr/bin/env bash
 test "$1" = --lock && test "$2" = opencode
+printf 'passwd %s\n' "$*" >>"$FAKE_MUTATION_LOG"
 EOF
 cat >"$fake_bin/useradd" <<EOF
 #!/usr/bin/env bash
@@ -159,33 +152,44 @@ EOF
 cat >"$fake_bin/install" <<'EOF'
 #!/usr/bin/env bash
 path="${!#}"
+printf 'install %s\n' "$*" >>"$FAKE_MUTATION_LOG"
 mkdir -p "$path"
 EOF
 cat >"$fake_bin/chown" <<'EOF'
 #!/usr/bin/env bash
+printf 'chown %s\n' "$*" >>"$FAKE_MUTATION_LOG"
 exit 0
 EOF
 cat >"$fake_bin/chmod" <<'EOF'
 #!/usr/bin/env bash
+printf 'chmod %s\n' "$*" >>"$FAKE_MUTATION_LOG"
 exit 0
 EOF
 chmod +x "$fake_bin"/*
 
-PATH="$fake_bin:$PATH" FAKE_ACCOUNT_HOME="$fake_home/opencode" FAKE_ACCOUNT_STATE="$test_root/fake-account" bash "$provision_script" --public-key-file "$test_root/test_key.pub"
+PATH="$fake_bin:$PATH" FAKE_ACCOUNT_HOME="$fake_home/opencode" FAKE_ACCOUNT_STATE="$test_root/fake-account" FAKE_MUTATION_LOG="$fake_log" bash "$provision_script" --public-key-file "$test_root/test_key.pub"
 grep -Fq -- '--create-home --user-group --shell /bin/bash opencode' "$fake_log" || fail 'opencode user was not created with a login shell and private primary group'
 grep -Fq -- '--groups  opencode' "$fake_log" && fail 'opencode was assigned supplementary groups'
 grep -Fxq "$public_key" "$fake_home/opencode/.ssh/authorized_keys" || fail 'provided public key was not installed verbatim'
-PATH="$fake_bin:$PATH" FAKE_ACCOUNT_HOME="$fake_home/opencode" FAKE_ACCOUNT_STATE="$test_root/fake-account" bash "$provision_script" --public-key-file "$test_root/test_key.pub"
-test "$(grep -Fxc "$public_key" "$fake_home/opencode/.ssh/authorized_keys")" = '1' || fail 'public key was appended more than once'
+safe_existing_home="$test_root/existing-safe/opencode"
+mkdir -p "$safe_existing_home/.ssh"
+printf 'existing-safe-key\n' >"$safe_existing_home/.ssh/authorized_keys"
+cp "$safe_existing_home/.ssh/authorized_keys" "$test_root/existing-safe-authorized_keys.before"
+assert_existing_account_refusal_has_no_side_effects 'safe existing account' "$safe_existing_home"
+cmp -s "$test_root/existing-safe-authorized_keys.before" "$safe_existing_home/.ssh/authorized_keys" || fail 'safe existing account changed authorized_keys before refusal'
 
-assert_existing_account_refusal_preserves_authorized_keys 'root UID' '0' '/bin/bash' '1001' 'opencode' '0'
-assert_existing_account_refusal_preserves_authorized_keys 'disabled shell' '1001' '/usr/sbin/nologin' '1001' 'opencode' '0'
-# Every supplementary group is prohibited. These numeric fixtures model the
-# docker and sudo memberships that N1 requires the provisioning flow to reject.
-assert_existing_account_refusal_preserves_authorized_keys 'docker supplementary group' '1001' '/bin/bash' '1001 998' 'opencode docker' '0'
-assert_existing_account_refusal_preserves_authorized_keys 'sudo supplementary group' '1001' '/bin/bash' '1001 27' 'opencode sudo' '0'
-assert_existing_account_refusal_preserves_authorized_keys 'wheel supplementary group' '1001' '/bin/bash' '1001 10' 'opencode wheel' '0'
-assert_existing_account_refusal_preserves_authorized_keys 'passwordless sudo' '1001' '/bin/bash' '1001' 'opencode' '1'
+ssh_symlink_home="$test_root/existing-ssh-symlink/opencode"
+mkdir -p "$ssh_symlink_home/ssh-target"
+ln -s ssh-target "$ssh_symlink_home/.ssh"
+assert_existing_account_refusal_has_no_side_effects '.ssh symlink' "$ssh_symlink_home"
+test ! -e "$ssh_symlink_home/ssh-target/authorized_keys" || fail '.ssh symlink wrote below the existing account home before refusal'
+
+authorized_keys_symlink_home="$test_root/existing-authorized-keys-symlink/opencode"
+authorized_keys_symlink_target="$test_root/existing-authorized-keys-symlink/attacker/authorized_keys"
+mkdir -p "$authorized_keys_symlink_home/.ssh" "$(dirname "$authorized_keys_symlink_target")"
+ln -s "$authorized_keys_symlink_target" "$authorized_keys_symlink_home/.ssh/authorized_keys"
+assert_existing_account_refusal_has_no_side_effects 'authorized_keys symlink' "$authorized_keys_symlink_home"
+test ! -e "$authorized_keys_symlink_target" || fail 'authorized_keys symlink wrote outside the existing account home before refusal'
 
 grep -Fxq '      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2' "$ci_workflow" || fail 'CI checkout is not pinned to the approved v4.2.2 SHA'
 grep -Fxq '          bash tests/ssh-policy-contract.sh' "$ci_workflow" || fail 'CI does not run the SSH policy contract'
