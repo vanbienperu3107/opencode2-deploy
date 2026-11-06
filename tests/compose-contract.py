@@ -66,7 +66,12 @@ def validate(compose: dict[str, object]) -> None:
         fail("sidecar state volume is missing")
 
     devices = sidecar.get("devices")
-    if not isinstance(devices, list) or not any(isinstance(device, str) and device.startswith("/dev/net/tun:") for device in devices):
+    if not isinstance(devices, list) or not any(
+        isinstance(device, dict)
+        and device.get("source") == "/dev/net/tun"
+        and device.get("target") == "/dev/net/tun"
+        for device in devices
+    ):
         fail("sidecar must receive the TUN device")
     capabilities = sidecar.get("cap_add")
     if not isinstance(capabilities, list) or "NET_ADMIN" not in capabilities:

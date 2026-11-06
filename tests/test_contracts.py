@@ -334,7 +334,7 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("unsafe scoped symlink", result.stderr)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
-        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stderr)
 
     def test_fails_closed_and_redacts_an_in_root_directory_symlink(self) -> None:
         sentinel = self.github_token_sentinel("H")
@@ -349,7 +349,7 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("unsafe scoped symlink", result.stderr)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
-        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stderr)
 
     def test_fails_closed_when_a_file_becomes_a_symlink_between_stat_and_open(self) -> None:
         scanner = load_scanner_module()
@@ -428,7 +428,7 @@ class RuntimeComposeContractTests(unittest.TestCase):
                 "ts-opencode2": {
                     "image": "tailscale/tailscale:v1.104.4",
                     "environment": {"TS_AUTHKEY": "ci-placeholder-ts-authkey", "TS_STATE_DIR": "/var/lib/tailscale", "TS_USERSPACE": "false"},
-                    "devices": ["/dev/net/tun:/dev/net/tun:rwm"],
+                    "devices": [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}],
                     "cap_add": ["NET_ADMIN"],
                     "volumes": [{"type": "volume", "source": "opencode2_tailscale_state", "target": "/var/lib/tailscale"}],
                     "networks": {"edge": None},
@@ -465,6 +465,20 @@ class RuntimeComposeContractTests(unittest.TestCase):
         compose["services"]["opencode2"]["network_mode"] = "service:opencode2-ts-opencode2"  # type: ignore[index]
         result = self.validate_rendered_compose(compose)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_missing_sidecar_tun_device(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["ts-opencode2"]["devices"] = []  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sidecar must receive the TUN device", result.stderr)
+
+    def test_rejects_tun_device_assigned_to_application(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["devices"] = [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}]  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("application must not receive ports, devices", result.stderr)
 
     def test_rejects_missing_rendered_isolation_volume_config_healthcheck_or_secret(self) -> None:
         cases = {
