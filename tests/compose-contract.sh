@@ -12,7 +12,6 @@ grep -Fq 'image: tailscale/tailscale:v1.104.4' "$rendered"
 grep -Fq 'network_mode: service:ts-opencode2' "$rendered"
 grep -Fq '/dev/net/tun' "$rendered"
 grep -Fq 'NET_ADMIN' "$rendered"
-grep -Fq 'no-new-privileges:true' "$rendered"
 
 python3 - "$rendered" <<'PY'
 from __future__ import annotations
@@ -30,12 +29,14 @@ opencode = services["opencode2"]
 assert tailscale["devices"] == ["/dev/net/tun"]
 assert tailscale["cap_add"] == ["NET_ADMIN"]
 assert "ports" not in tailscale
+assert "no-new-privileges:true" in tailscale["security_opt"]
 assert opencode["network_mode"] == "service:ts-opencode2"
 assert "ports" not in opencode
 assert "devices" not in opencode
 assert "cap_add" not in opencode
 assert "privileged" not in opencode
 assert "docker.sock" not in str(opencode)
+assert "no-new-privileges:true" in opencode["security_opt"]
 volumes = {volume["target"]: volume for volume in opencode["volumes"]}
 assert set(volumes) == {"/workspace/projects", "/root"}
 assert volumes["/workspace/projects"]["type"] == "volume"
