@@ -83,10 +83,17 @@ jobs:
             test "$($SUDO git rev-parse HEAD)" = "$REF"
             $SUDO docker network inspect edge >/dev/null 2>&1 || $SUDO docker network create edge
 
-            # This file is owned by the existing Headscale deployment. The API
-            # key stays on verified VPN4 and is never exported to the runner.
-            HEADSCALE_ENV=/opt/deployHeadscale/.env
-            $SUDO test -r "$HEADSCALE_ENV" || { echo 'Headscale runtime env is unavailable on vpn4' >&2; exit 1; }
+            # The established Headscale deployment owns this credential. Locate
+            # exactly one local runtime env carrying it; never print a path or key.
+            HEADSCALE_ENV=''
+            for candidate in /opt/deployHeadscale/.env /opt/deployHeadscale/*/.env; do
+              $SUDO test -r "$candidate" || continue
+              if $SUDO grep -q '^HEADPLANE_HS_API_KEY=' "$candidate"; then
+                test -z "$HEADSCALE_ENV" || { echo 'Headscale credential source is ambiguous on vpn4' >&2; exit 1; }
+                HEADSCALE_ENV=$candidate
+              fi
+            done
+            test -n "$HEADSCALE_ENV" || { echo 'Headscale runtime credential is unavailable on vpn4' >&2; exit 1; }
             HS_API_KEY=$($SUDO awk -F= '$1 == "HEADPLANE_HS_API_KEY" { sub(/^[^=]*=/, ""); print; exit }' "$HEADSCALE_ENV")
             test -n "$HS_API_KEY" || { echo 'Headscale API key is unavailable on vpn4' >&2; exit 1; }
             printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo 'headscale_user_id must be numeric' >&2; exit 1; }

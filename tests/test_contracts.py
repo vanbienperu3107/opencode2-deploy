@@ -447,7 +447,7 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("headscale_user_id:", workflow)
         self.assertIn("required: true", workflow[workflow.index("headscale_user_id:"):workflow.index("concurrency:")])
         self.assertIn("HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}", workflow)
-        self.assertIn("HEADSCALE_ENV=/opt/deployHeadscale/.env", workflow)
+        self.assertIn("for candidate in /opt/deployHeadscale/.env /opt/deployHeadscale/*/.env", workflow)
         self.assertIn("HEADPLANE_HS_API_KEY", workflow)
         self.assertNotIn("secrets.HEADPLANE_HS_API_KEY", workflow)
         self.assertIn("^[0-9]+$", workflow)
