@@ -43,6 +43,17 @@ def has_volume(service: dict[str, object], source: str, target: str) -> bool:
     )
 
 
+def file_mode(value: object) -> int | None:
+    """Normalize a Compose file mode; Compose renders it as an octal string such as "0444"."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value and all(character in "01234567" for character in value):
+        return int(value, 8)
+    return None
+
+
 def validate(compose: dict[str, object]) -> None:
     services = compose.get("services")
     sidecar = required_service(services, "ts-opencode2")
@@ -90,7 +101,7 @@ def validate(compose: dict[str, object]) -> None:
         isinstance(config, dict)
         and config.get("source") == "opencode-config"
         and config.get("target") == "/etc/opencode/opencode.jsonc"
-        and config.get("mode") == 0o444
+        and file_mode(config.get("mode")) == 0o444
         for config in configs
     ):
         fail("application must receive the readonly OpenCode config")

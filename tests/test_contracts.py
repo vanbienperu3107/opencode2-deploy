@@ -466,6 +466,22 @@ class RuntimeComposeContractTests(unittest.TestCase):
         result = self.validate_rendered_compose(compose)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_accepts_compose_rendered_octal_string_config_mode(self) -> None:
+        # docker compose config --format json renders configs[].mode as "0444".
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["configs"][0]["mode"] = "0444"  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_writable_config_mode_in_either_rendering(self) -> None:
+        for mode in ("0644", 0o644, "0666", "not-octal", None):
+            with self.subTest(mode=mode):
+                compose = self.valid_rendered_compose()
+                compose["services"]["opencode2"]["configs"][0]["mode"] = mode  # type: ignore[index]
+                result = self.validate_rendered_compose(compose)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("readonly OpenCode config", result.stderr)
+
     def test_rejects_missing_sidecar_tun_device(self) -> None:
         compose = self.valid_rendered_compose()
         compose["services"]["ts-opencode2"]["devices"] = []  # type: ignore[index]
