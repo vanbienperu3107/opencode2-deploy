@@ -18,6 +18,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 VALIDATOR = REPOSITORY / "scripts" / "validate-v2-contract.py"
 SCANNER = REPOSITORY / "scripts" / "scan-secrets.py"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "ci.yml"
+DEPLOY_WORKFLOW = REPOSITORY / ".github" / "workflows" / "deploy.yml"
 COMPOSE = REPOSITORY / "docker-compose.yml"
 COMPOSE_CONTRACT = REPOSITORY / "tests" / "compose-contract.sh"
 COMPOSE_VALIDATOR = REPOSITORY / "tests" / "compose-contract.py"
@@ -412,6 +413,48 @@ class WorkflowPinTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
 
 
+class DeployWorkflowSecurityTests(unittest.TestCase):
+    def test_preflights_ssh_target_identity_and_fingerprint_before_creating_preauth_key(self) -> None:
+        workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        preflight = workflow.index("- name: Check required secrets")
+        transport = workflow.index("- name: Preflight vpn4 SSH transport")
+        create_key = workflow.index("- name: Create Tailscale pre-auth key for opencode2")
+        self.assertLess(preflight, transport)
+        self.assertLess(transport, create_key)
+        for secret in ("SSH_HOST_VPN4", "SSH_USER", "SSH_KEY", "SSH_HOST_VPN4_FINGERPRINT"):
+            self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", workflow)
+            self.assertIn(secret, workflow[preflight:create_key])
+
+        transport_step = workflow[transport:create_key]
+        self.assertIn("appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0", transport_step)
+        self.assertIn("host: ${{ secrets.SSH_HOST_VPN4 }}", transport_step)
+        self.assertIn("username: ${{ secrets.SSH_USER }}", transport_step)
+        self.assertIn("key: ${{ secrets.SSH_KEY }}", transport_step)
+        self.assertIn("fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}", transport_step)
+        self.assertIn("script: |\n            true", transport_step)
+
+    def test_uses_pinned_ssh_action_and_verifies_vpn4_host_fingerprint(self) -> None:
+        workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0",
+            workflow,
+        )
+        self.assertNotIn("appleboy/ssh-action@v1.2.0", workflow)
+        self.assertIn("fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}", workflow)
+
+    def test_creates_preauth_key_only_for_the_requested_numeric_headscale_user(self) -> None:
+        workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("headscale_user_id:", workflow)
+        self.assertIn("required: true", workflow[workflow.index("headscale_user_id:"):workflow.index("concurrency:")])
+        self.assertIn("HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}", workflow)
+        self.assertIn("^[0-9]+$", workflow)
+        self.assertNotIn('print(u[0]["id"] if u else "")', workflow)
+        self.assertIn("requested Headscale user was not found", workflow)
+        self.assertIn('\\"user\\":\\"$HEADSCALE_USER_ID\\"', workflow)
+        self.assertIn('\\"reusable\\":false,\\"ephemeral\\":false', workflow)
+        self.assertIn("+1 hour", workflow)
+
+
 class RuntimeComposeContractTests(unittest.TestCase):
     def test_runtime_contract_script_is_versioned_and_runs_in_ci(self) -> None:
         self.assertTrue(COMPOSE_CONTRACT.is_file())
@@ -419,6 +462,9 @@ class RuntimeComposeContractTests(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("docker compose --env-file tests/compose-ci.env config --format json", script)
         self.assertIn("python3 tests/compose-contract.py", script)
+        deploy_workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('RUNTIME_ENV="$DEST/current/.env"', deploy_workflow)
+        self.assertIn('docker compose --env-file "$RUNTIME_ENV"', deploy_workflow)
         self.assertIn("bash tests/compose-contract.sh", workflow)
 
     @staticmethod

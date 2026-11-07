@@ -15,10 +15,11 @@ jobs:
       - name: Render Compose configuration
         run: docker compose --env-file tests/compose-ci.env config --format json
       - name: Test validation contracts
-        run: python3 -m unittest -v tests.test_contracts
+        run: python3 -m unittest -v tests.test_contracts tests.test_compose_contract_devices
       - name: Test runtime Compose contract
         run: bash tests/compose-contract.sh
       - name: Validate public baseline
         run: |
           bash tests/validate-config.sh
           bash tests/ssh-policy-contract.sh
+          bash tests/deploy-workflow-contract.sh

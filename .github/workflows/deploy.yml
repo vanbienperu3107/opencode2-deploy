@@ -1,0 +1,152 @@
+name: Deploy OpenCode v2 (vpn4)
+
+# Manual deploy of the isolated OpenCode v2 stack to /opt/opencode2 on vpn4.
+# Volumes are never removed; rollback = redeploy an earlier commit SHA.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact commit SHA of this repository to deploy
+        required: true
+      headscale_user_id:
+        description: Numeric Headscale user ID that will own the one-hour pre-auth key
+        required: true
+
+concurrency:
+  group: deploy-vpn4-host
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate requested commit
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          printf '%s' "$REF" | grep -Eq '^[0-9a-f]{40}$' || { echo "::error::ref must be a full 40-char commit SHA"; exit 1; }
+
+      - name: Check required secrets
+        env:
+          OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+          CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+          OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
+          OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
+          HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
+          SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST_VPN4_FINGERPRINT: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
+        run: |
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HS_API_KEY SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
+            test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
+          done
+          echo "required secrets present"
+
+      - name: Preflight vpn4 SSH transport
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST_VPN4 }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          script_stop: true
+          command_timeout: 1m
+          script: |
+            true
+
+      - name: Create Tailscale pre-auth key for opencode2
+        id: ts_key
+        env:
+          HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
+          HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo "::error::headscale_user_id must be numeric"; exit 1; }
+          users=$(curl -sf -m 15 -H "Authorization: Bearer $HS_API_KEY" https://vpn2.hangocthanh.io.vn/api/v1/user)
+          printf '%s' "$users" | HEADSCALE_USER_ID="$HEADSCALE_USER_ID" python3 -c 'import json,os,sys; user_id=os.environ["HEADSCALE_USER_ID"]; users=json.load(sys.stdin).get("users") or []; sys.exit(0 if any(str(user.get("id")) == user_id for user in users) else 1)' \
+            || { echo "::error::requested Headscale user was not found"; exit 1; }
+          expiry=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
+          key=$(curl -sf -m 15 -X POST -H "Authorization: Bearer $HS_API_KEY" -H 'Content-Type: application/json' \
+            -d "{\"user\":\"$HEADSCALE_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
+            https://vpn2.hangocthanh.io.vn/api/v1/preauthkey \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("preAuthKey") or {}).get("key",""))')
+          test -n "$key" || { echo "::error::could not create pre-auth key"; exit 1; }
+          echo "::add-mask::$key"
+          echo "key=$key" >>"$GITHUB_OUTPUT"
+          echo "single-use pre-auth key created (expires in 1h)"
+
+      - name: Deploy stack to vpn4
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST_VPN4 }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          envs: REF,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS,TS_AUTHKEY
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -E"; else SUDO=""; fi
+            DEST=/opt/opencode2
+            $SUDO mkdir -p "$DEST"
+            if [ ! -d "$DEST/.git" ]; then
+              $SUDO git clone -q https://github.com/vanbienperu3107/opencode2-deploy.git "$DEST"
+            fi
+            cd "$DEST"
+            $SUDO git config --global --add safe.directory "$DEST" || true
+            $SUDO git fetch -q origin
+            $SUDO git checkout --detach -q "$REF"
+            test "$($SUDO git rev-parse HEAD)" = "$REF"
+            $SUDO docker network inspect edge >/dev/null 2>&1 || $SUDO docker network create edge
+            # Tailscale ignores the auth key once its state volume holds an identity,
+            # so redeploys keep the same Tailnet node.
+            $SUDO env OUTPUT_DIR="$DEST" OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
+              CLIPROXY_API_KEY="$CLIPROXY_API_KEY" TS_AUTHKEY="$TS_AUTHKEY" \
+              OPENCODE_SSH_PRIVATE_KEY="$OPENCODE_SSH_PRIVATE_KEY" \
+              OPENCODE_SSH_KNOWN_HOSTS="$OPENCODE_SSH_KNOWN_HOSTS" \
+              bash scripts/render-runtime-env.sh
+            RUNTIME_ENV="$DEST/current/.env"
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy config -q
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy pull -q
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy up -d --remove-orphans
+            for i in $(seq 1 30); do
+              state=$($SUDO docker inspect -f '{{.State.Health.Status}}' opencode2-deploy-opencode2-1 2>/dev/null || echo starting)
+              echo "  opencode2 health: $state"
+              [ "$state" = healthy ] && break
+              sleep 5
+            done
+            [ "$state" = healthy ] || { $SUDO docker compose -p opencode2-deploy logs --tail 60; exit 1; }
+            $SUDO docker exec opencode2-deploy-ts-opencode2-1 tailscale status --self --peers=false
+            echo "deployed $REF"
+        env:
+          REF: ${{ inputs.ref }}
+          OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+          CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+          OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
+          OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
+          TS_AUTHKEY: ${{ steps.ts_key.outputs.key }}
+
+      - name: Verify public endpoint requires authentication
+        env:
+          OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          url=https://opencode2.hangocthanh.io.vn/global/health
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)
+            echo "  unauthenticated -> ${code:-000}"
+            [ "$code" = 401 ] && break
+            sleep 6
+          done
+          [ "$code" = 401 ] || { echo "::error::expected 401 without credentials, got $code"; exit 1; }
+          code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 15 -u "opencode:$OPENCODE_SERVER_PASSWORD" "$url")
+          echo "  authenticated -> $code"
+          [ "$code" = 200 ] || { echo "::error::authenticated health failed"; exit 1; }
+          python3 -c 'import json; d=json.load(open("/tmp/health.json")); print("healthy=%s version=%s" % (d.get("healthy"), d.get("version")))'
