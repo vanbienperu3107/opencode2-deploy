@@ -67,12 +67,16 @@ fi
 test ! -e "$test_root/out/.env" || fail 'renderer wrote an env file without secrets'
 
 mkdir -p "$test_root/out"
+private_key_header="-----BEGIN OPENSSH"$' '"PRIVATE KEY-----"
+private_key_footer="-----END OPENSSH"$' '"PRIVATE KEY-----"
+private_key="$private_key_header"$'\ncontract-key-material\n'"$private_key_footer"
+known_hosts=$'node-a.tailnet.ts.net ssh-ed25519 contract-key-a\nnode-b.tailnet.ts.net ssh-ed25519 contract-key-b'
 env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   OPENCODE_SERVER_PASSWORD='contract-password' \
   CLIPROXY_API_KEY='contract-cliproxy' \
   TS_AUTHKEY='contract-authkey' \
-  OPENCODE_SSH_PRIVATE_KEY='contract-ssh-private-key' \
-  OPENCODE_SSH_KNOWN_HOSTS='contract-known-hosts' \
+  OPENCODE_SSH_PRIVATE_KEY="$private_key" \
+  OPENCODE_SSH_KNOWN_HOSTS="$known_hosts" \
   bash "$renderer" >"$test_root/stdout" 2>&1 || fail 'renderer rejected complete secrets'
 current="$test_root/out/current"
 test -L "$current" || fail 'runtime renderer must publish an atomic current generation pointer'
@@ -85,6 +89,9 @@ grep -Fxq 'OPENCODE_SERVER_USERNAME=opencode' "$generation/.env" || fail 'runtim
 grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'runtime env lost the password'
 grep -Fxq "OPENCODE_SSH_KEY_FILE=$current/opencode_ssh_key" "$generation/.env" || fail 'runtime env must reference the current-generation SSH key'
 grep -Fxq "OPENCODE_SSH_KNOWN_HOSTS_FILE=$current/opencode_known_hosts" "$generation/.env" || fail 'runtime env must reference the current-generation known hosts'
+grep -Fxq -- "$private_key_header" "$generation/opencode_ssh_key" || fail 'renderer must preserve multiline SSH private-key material'
+grep -Fxq 'node-a.tailnet.ts.net ssh-ed25519 contract-key-a' "$generation/opencode_known_hosts" || fail 'renderer must preserve multiline known-hosts material'
+grep -Fxq 'node-b.tailnet.ts.net ssh-ed25519 contract-key-b' "$generation/opencode_known_hosts" || fail 'renderer must preserve every known-host entry'
 
 # Failure during the second secret publish must not alter the currently live generation.
 previous_target=$(readlink "$current")

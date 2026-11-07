@@ -11,12 +11,17 @@ fail() {
 
 output_dir=${OUTPUT_DIR:?OUTPUT_DIR must point at the deployment directory}
 
-for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY TS_AUTHKEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS; do
+# Only values embedded as KEY=value in .env must be single-line. SSH private
+# keys and known_hosts are file material and normally contain multiple lines.
+for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY TS_AUTHKEY; do
   value=${!name:-}
   test -n "$value" || fail "$name is required"
   case "$value" in
     *$'\n'*|*$'\r'*) fail "$name must be a single line" ;;
   esac
+done
+for name in OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS; do
+  test -n "${!name:-}" || fail "$name is required"
 done
 
 mkdir -p "$output_dir/generations"
