@@ -135,6 +135,10 @@ printf 'passwd %s\n' "$*" >>"$FAKE_MUTATION_LOG"
 EOF
 cat >"$fake_bin/useradd" <<EOF
 #!/usr/bin/env bash
+if test "\${1:-}" = -D; then
+  printf 'HOME=%s\\n' "\$FAKE_HOME_BASE"
+  exit 0
+fi
 printf 'useradd %s\\n' "\$*" >>'$fake_log'
 mkdir -p "\$FAKE_ACCOUNT_HOME"
 touch "\$FAKE_ACCOUNT_STATE"
@@ -170,7 +174,46 @@ exit 0
 EOF
 chmod +x "$fake_bin"/*
 
-PATH="$fake_bin:$PATH" FAKE_ACCOUNT_HOME="$fake_home/opencode" FAKE_ACCOUNT_STATE="$test_root/fake-account" FAKE_MUTATION_LOG="$fake_log" bash "$provision_script" --public-key-file "$test_root/test_key.pub"
+real_uid=$(id -u)
+export FAKE_ACCOUNT_UID="$real_uid"
+
+# A leftover home (account deleted without -r) must never be reused: root
+# writes below it could follow attacker-planted symlinks.
+for leftover in ssh-symlink authorized-keys-symlink plain-directory; do
+  leftover_base="$test_root/leftover-$leftover"
+  leftover_home="$leftover_base/opencode"
+  leftover_target="$test_root/leftover-$leftover-target"
+  mkdir -p "$leftover_home" "$leftover_target"
+  case "$leftover" in
+    ssh-symlink) ln -s "$leftover_target" "$leftover_home/.ssh" ;;
+    authorized-keys-symlink) mkdir -p "$leftover_home/.ssh"; ln -s "$leftover_target/authorized_keys" "$leftover_home/.ssh/authorized_keys" ;;
+  esac
+  rm -f "$test_root/fake-account"
+  : >"$fake_log"
+  if PATH="$fake_bin:$PATH" FAKE_HOME_BASE="$leftover_base" FAKE_ACCOUNT_HOME="$leftover_home" \
+    FAKE_ACCOUNT_STATE="$test_root/fake-account" FAKE_MUTATION_LOG="$fake_log" \
+    bash "$provision_script" --public-key-file "$test_root/test_key.pub" >/dev/null 2>&1; then
+    fail "leftover home ($leftover) was reused"
+  fi
+  test ! -s "$fake_log" || fail "leftover home ($leftover) performed a root mutation"
+  test -z "$(ls -A "$leftover_target")" || fail "leftover home ($leftover) wrote through a symlink"
+done
+
+for unsafe_base in '' 'relative/home' '/'; do
+  rm -f "$test_root/fake-account"
+  : >"$fake_log"
+  if PATH="$fake_bin:$PATH" FAKE_HOME_BASE="$unsafe_base" FAKE_ACCOUNT_HOME="$test_root/unused" \
+    FAKE_ACCOUNT_STATE="$test_root/fake-account" FAKE_MUTATION_LOG="$fake_log" \
+    bash "$provision_script" --public-key-file "$test_root/test_key.pub" >/dev/null 2>&1; then
+    fail "unsafe home base '$unsafe_base' was accepted"
+  fi
+  test ! -s "$fake_log" || fail "unsafe home base '$unsafe_base' performed a root mutation"
+done
+
+rm -f "$test_root/fake-account"
+: >"$fake_log"
+PATH="$fake_bin:$PATH" FAKE_HOME_BASE="$fake_home" FAKE_ACCOUNT_HOME="$fake_home/opencode" FAKE_ACCOUNT_STATE="$test_root/fake-account" FAKE_MUTATION_LOG="$fake_log" bash "$provision_script" --public-key-file "$test_root/test_key.pub"
+grep -Fq -- "--home-dir $fake_home/opencode" "$fake_log" || fail 'opencode user was not created at the validated home directory'
 grep -Fq -- '--create-home --user-group --shell /bin/bash opencode' "$fake_log" || fail 'opencode user was not created with a login shell and private primary group'
 grep -Fq -- '--groups  opencode' "$fake_log" && fail 'opencode was assigned supplementary groups'
 grep -Fxq "$public_key" "$fake_home/opencode/.ssh/authorized_keys" || fail 'provided public key was not installed verbatim'

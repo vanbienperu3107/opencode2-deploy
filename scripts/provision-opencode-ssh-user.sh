@@ -90,9 +90,31 @@ case "$lookup_status" in
   *) fail 'cannot determine whether the opencode account exists' ;;
 esac
 
-useradd --create-home --user-group --shell /bin/bash "$account_name"
+# Resolve and validate the home directory before creating the account. A
+# leftover home (for example from `userdel` without -r) is never reused:
+# useradd would keep its contents and root writes below it could follow
+# symlinks planted by its previous owner.
+home_base=$(useradd -D | awk -F= '$1 == "HOME" { print $2; exit }')
+case "$home_base" in
+  /*) ;;
+  *) fail 'cannot determine a safe absolute home base for the opencode account' ;;
+esac
+home_base=${home_base%/}
+test -n "$home_base" || fail 'refusing to place the opencode home at the filesystem root'
+account_home="$home_base/$account_name"
+if test -e "$account_home" || test -L "$account_home"; then
+  fail 'refusing to reuse an existing opencode home directory'
+fi
+
+useradd --home-dir "$account_home" --create-home --user-group --shell /bin/bash "$account_name"
 account_record=$(getent passwd "$account_name")
-account_home=$(printf '%s\n' "$account_record" | awk -F: 'NR == 1 { print $6 }')
+recorded_home=$(printf '%s\n' "$account_record" | awk -F: 'NR == 1 { print $6 }')
+test "$recorded_home" = "$account_home" || fail 'opencode account home does not match the validated path'
+test -d "$account_home" && test ! -L "$account_home" || fail 'opencode home is not a real directory'
+test "$(stat -c '%u' "$account_home")" = "$(id -u "$account_name")" || fail 'opencode home is not owned by the new account'
+if test -e "$account_home/.ssh" || test -L "$account_home/.ssh"; then
+  fail 'refusing to use a preexisting .ssh entry in the new opencode home'
+fi
 passwd --lock "$account_name" >/dev/null
 install -d -m 0700 -o "$account_name" -g "$account_name" "$account_home/.ssh"
 authorized_keys="$account_home/.ssh/authorized_keys"
