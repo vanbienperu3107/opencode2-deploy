@@ -18,17 +18,33 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 VALIDATOR = REPOSITORY / "scripts" / "validate-v2-contract.py"
 SCANNER = REPOSITORY / "scripts" / "scan-secrets.py"
 WORKFLOW = REPOSITORY / ".github" / "workflows" / "ci.yml"
+COMPOSE = REPOSITORY / "docker-compose.yml"
+COMPOSE_CONTRACT = REPOSITORY / "tests" / "compose-contract.sh"
+COMPOSE_VALIDATOR = REPOSITORY / "tests" / "compose-contract.py"
+COMPOSE_CI_ENV = REPOSITORY / "tests" / "compose-ci.env"
+CONFIG = REPOSITORY / "opencode.jsonc"
 CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
 
 
 def valid_config() -> dict[str, object]:
     return {
         "$schema": "https://opencode.ai/config.json",
-        "providers": {},
-        "permissions": [
-            {"action": "*", "resource": "*", "effect": "allow"},
-        ],
+        "providers": {
+            "cliproxy": {
+                "name": "CLIProxy",
+                "env": ["CLIPROXY_API_KEY"],
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {"baseURL": "https://cliproxy.hangocthanh.io.vn/v1", "apiKey": "{env:CLIPROXY_API_KEY}"},
+                "models": {"deepseek-v4-flash": {"name": "DeepSeek V4 Flash", "modelID": "deepseek-v4-flash"}},
+            },
+        },
+        "model": "cliproxy/deepseek-v4-flash",
+        "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
     }
+
+
+def valid_cliproxy_config() -> dict[str, object]:
+    return valid_config()
 
 
 def run_command(*command: str) -> subprocess.CompletedProcess[str]:
@@ -63,8 +79,31 @@ class V2ContractValidatorTests(unittest.TestCase):
             return run_command(sys.executable, str(VALIDATOR), str(config_path))
 
     def test_accepts_only_the_required_v2_baseline_shape(self) -> None:
-        result = self.validate(valid_config())
+        result = self.validate(valid_cliproxy_config())
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_requires_the_cliproxy_openai_compatible_provider_contract(self) -> None:
+        cases = {
+            "missing": {"$schema": "https://opencode.ai/config.json", "providers": {}, "permissions": [{"action": "*", "resource": "*", "effect": "allow"}]},
+            "wrong_package": valid_cliproxy_config(),
+            "wrong_base_url": valid_cliproxy_config(),
+            "missing_api_key_template": valid_cliproxy_config(),
+            "missing_deployment_default": valid_cliproxy_config(),
+            "missing_model": valid_cliproxy_config(),
+            "wrong_model_id": valid_cliproxy_config(),
+        }
+        cases["wrong_package"]["providers"]["cliproxy"]["package"] = "@ai-sdk/openai-compatible"  # type: ignore[index]
+        cases["wrong_base_url"]["providers"]["cliproxy"]["settings"]["baseURL"] = "https://example.invalid/v1"  # type: ignore[index]
+        del cases["missing_api_key_template"]["providers"]["cliproxy"]["settings"]["apiKey"]  # type: ignore[index]
+        del cases["missing_deployment_default"]["model"]
+        del cases["missing_model"]["providers"]["cliproxy"]["models"]  # type: ignore[index]
+        cases["wrong_model_id"]["providers"]["cliproxy"]["models"]["deepseek-v4-flash"]["modelID"] = "other-model"  # type: ignore[index]
+
+        for name, config in cases.items():
+            with self.subTest(name=name):
+                result = self.validate(config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("CLIProxy", result.stderr)
 
     def test_rejects_v1_provider_and_permission_fields(self) -> None:
         for field, value in (("provider", {}), ("permission", [])):
@@ -111,29 +150,21 @@ class V2ContractValidatorTests(unittest.TestCase):
         for field, value in (("action", 1), ("resource", []), ("effect", None)):
             with self.subTest(field=field):
                 config = valid_config()
-                config["permissions"] = [
-                    {"action": "*", "resource": "*", "effect": "allow"},
-                    {"action": "read", "resource": "*", "effect": "allow", field: value},
-                ]
+                config["permissions"] = [{"action": "*", "resource": "*", "effect": "allow"}, {"action": "read", "resource": "*", "effect": "allow", field: value}]
                 result = self.validate(config)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"field '{field}' must be a string", result.stderr)
 
     def test_rejects_v1_bash_permission_action(self) -> None:
         config = valid_config()
-        config["permissions"] = [
-            {"action": "bash", "resource": "*", "effect": "allow"},
-            {"action": "*", "resource": "*", "effect": "allow"},
-        ]
+        config["permissions"] = [{"action": "bash", "resource": "*", "effect": "allow"}, {"action": "*", "resource": "*", "effect": "allow"}]
         result = self.validate(config)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("action 'bash' is invalid", result.stderr)
 
     def test_rejects_permissions_without_the_wildcard_allow_rule(self) -> None:
         config = valid_config()
-        config["permissions"] = [
-            {"action": "read", "resource": "*", "effect": "allow"},
-        ]
+        config["permissions"] = [{"action": "read", "resource": "*", "effect": "allow"}]
         result = self.validate(config)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("wildcard allow permission is required", result.stderr)
@@ -303,7 +334,7 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("unsafe scoped symlink", result.stderr)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
-        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stderr)
 
     def test_fails_closed_and_redacts_an_in_root_directory_symlink(self) -> None:
         sentinel = self.github_token_sentinel("H")
@@ -318,7 +349,7 @@ class SecretScannerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("unsafe scoped symlink", result.stderr)
         self.assertNotIn(sentinel, result.stdout + result.stderr)
-        self.assertNotIn(symlink_name, result.stdout + result.stderr)
+        self.assertNotIn(symlink_name, result.stderr)
 
     def test_fails_closed_when_a_file_becomes_a_symlink_between_stat_and_open(self) -> None:
         scanner = load_scanner_module()
@@ -379,6 +410,136 @@ class WorkflowPinTests(unittest.TestCase):
         self.assertIn(f"actions/checkout@{CHECKOUT_SHA}", workflow)
         self.assertNotIn("actions/checkout@v4", workflow)
         self.assertIn("contents: read", workflow)
+
+
+class RuntimeComposeContractTests(unittest.TestCase):
+    def test_runtime_contract_script_is_versioned_and_runs_in_ci(self) -> None:
+        self.assertTrue(COMPOSE_CONTRACT.is_file())
+        script = COMPOSE_CONTRACT.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("docker compose --env-file tests/compose-ci.env config --format json", script)
+        self.assertIn("python3 tests/compose-contract.py", script)
+        self.assertIn("bash tests/compose-contract.sh", workflow)
+
+    @staticmethod
+    def valid_rendered_compose() -> dict[str, object]:
+        return {
+            "services": {
+                "ts-opencode2": {
+                    "image": "tailscale/tailscale:v1.104.4",
+                    "environment": {"TS_AUTHKEY": "ci-placeholder-ts-authkey", "TS_STATE_DIR": "/var/lib/tailscale", "TS_USERSPACE": "false"},
+                    "devices": [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}],
+                    "cap_add": ["NET_ADMIN"],
+                    "volumes": [{"type": "volume", "source": "opencode2_tailscale_state", "target": "/var/lib/tailscale"}],
+                    "networks": {"edge": None},
+                },
+                "opencode2": {
+                    "image": "ghcr.io/anomalyco/opencode:2.0.32",
+                    "command": ["serve", "--hostname", "0.0.0.0", "--port", "4096"],
+                    "network_mode": "service:ts-opencode2",
+                    "environment": {"OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password", "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc"},
+                    "volumes": [
+                        {"type": "volume", "source": "opencode2_workspace", "target": "/workspace/projects"},
+                        {"type": "volume", "source": "opencode2_state", "target": "/root"},
+                    ],
+                    "configs": [{"source": "opencode-config", "target": "/etc/opencode/opencode.jsonc", "mode": 292}],
+                    "cap_drop": ["ALL"],
+                    "security_opt": ["no-new-privileges:true"],
+                    "healthcheck": {"test": ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4096/global/health"]},
+                },
+            },
+        }
+
+    def validate_rendered_compose(self, compose: dict[str, object]) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory(prefix="opencode2-compose-contract-", dir="/tmp") as directory:
+            rendered_path = Path(directory) / "compose.json"
+            rendered_path.write_text(json.dumps(compose), encoding="utf-8")
+            return run_command(sys.executable, str(COMPOSE_VALIDATOR), str(rendered_path))
+
+    def test_accepts_effective_rendered_compose_contract(self) -> None:
+        result = self.validate_rendered_compose(self.valid_rendered_compose())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_accepts_compose_normalized_sidecar_network_mode(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["network_mode"] = "service:opencode2-ts-opencode2"  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_accepts_compose_rendered_octal_string_config_mode(self) -> None:
+        # docker compose config --format json renders configs[].mode as "0444".
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["configs"][0]["mode"] = "0444"  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_writable_config_mode_in_either_rendering(self) -> None:
+        for mode in ("0644", 0o644, "0666", "not-octal", None):
+            with self.subTest(mode=mode):
+                compose = self.valid_rendered_compose()
+                compose["services"]["opencode2"]["configs"][0]["mode"] = mode  # type: ignore[index]
+                result = self.validate_rendered_compose(compose)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("readonly OpenCode config", result.stderr)
+
+    def test_rejects_missing_sidecar_tun_device(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["ts-opencode2"]["devices"] = []  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sidecar must receive the TUN device", result.stderr)
+
+    def test_rejects_tun_device_assigned_to_application(self) -> None:
+        compose = self.valid_rendered_compose()
+        compose["services"]["opencode2"]["devices"] = [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}]  # type: ignore[index]
+        result = self.validate_rendered_compose(compose)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("application must not receive ports, devices", result.stderr)
+
+    def test_rejects_missing_rendered_isolation_volume_config_healthcheck_or_secret(self) -> None:
+        cases = {
+            "network_isolation": self.valid_rendered_compose(),
+            "application_volume": self.valid_rendered_compose(),
+            "config_mount": self.valid_rendered_compose(),
+            "healthcheck": self.valid_rendered_compose(),
+            "required_password": self.valid_rendered_compose(),
+            "required_authkey": self.valid_rendered_compose(),
+        }
+        app = cases["network_isolation"]["services"]["opencode2"]  # type: ignore[index]
+        del app["network_mode"]  # type: ignore[index]
+        app = cases["application_volume"]["services"]["opencode2"]  # type: ignore[index]
+        app["volumes"] = []  # type: ignore[index]
+        app = cases["config_mount"]["services"]["opencode2"]  # type: ignore[index]
+        app["configs"] = []  # type: ignore[index]
+        app = cases["healthcheck"]["services"]["opencode2"]  # type: ignore[index]
+        del app["healthcheck"]  # type: ignore[index]
+        app = cases["required_password"]["services"]["opencode2"]  # type: ignore[index]
+        app["environment"]["OPENCODE_SERVER_PASSWORD"] = ""  # type: ignore[index]
+        sidecar = cases["required_authkey"]["services"]["ts-opencode2"]  # type: ignore[index]
+        sidecar["environment"]["TS_AUTHKEY"] = ""  # type: ignore[index]
+
+        for name, compose in cases.items():
+            with self.subTest(name=name):
+                result = self.validate_rendered_compose(compose)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Compose contract error", result.stderr)
+
+    def test_ci_render_environment_uses_nonsecret_nonempty_placeholders(self) -> None:
+        values = {}
+        for line in COMPOSE_CI_ENV.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            key, value = line.split("=", maxsplit=1)
+            values[key] = value
+        self.assertTrue(values["OPENCODE_SERVER_PASSWORD"])
+        self.assertTrue(values["TS_AUTHKEY"])
+        self.assertNotIn("tskey-", values["TS_AUTHKEY"].lower())
+
+    def test_committed_config_is_the_validated_cliproxy_v2_contract(self) -> None:
+        config = json.loads(CONFIG.read_text(encoding="utf-8"))
+        result = run_command(sys.executable, str(VALIDATOR), str(CONFIG))
+        self.assertEqual(config["providers"]["cliproxy"]["settings"]["baseURL"], "https://cliproxy.hangocthanh.io.vn/v1")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

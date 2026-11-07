@@ -13,8 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Render Compose configuration
-        run: docker compose --env-file .env.example config
+        run: docker compose --env-file tests/compose-ci.env config --format json
       - name: Test validation contracts
         run: python3 -m unittest -v tests.test_contracts
+      - name: Test runtime Compose contract
+        run: bash tests/compose-contract.sh
       - name: Validate public baseline
         run: bash tests/validate-config.sh

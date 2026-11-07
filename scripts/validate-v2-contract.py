@@ -11,6 +11,22 @@ from typing import NoReturn
 
 WILDCARD_ALLOW = {"action": "*", "resource": "*", "effect": "allow"}
 V1_FIELDS = ("provider", "permission")
+CLIPROXY_PROVIDER = {
+    "name": "CLIProxy",
+    "env": ["CLIPROXY_API_KEY"],
+    "package": "@opencode/ai/providers/openai-compatible",
+    "settings": {
+        "baseURL": "https://cliproxy.hangocthanh.io.vn/v1",
+        "apiKey": "{env:CLIPROXY_API_KEY}",
+    },
+    "models": {
+        "deepseek-v4-flash": {
+            "name": "DeepSeek V4 Flash",
+            "modelID": "deepseek-v4-flash",
+        },
+    },
+}
+DEFAULT_MODEL = "cliproxy/deepseek-v4-flash"
 
 
 def fail(message: str) -> NoReturn:
@@ -40,6 +56,12 @@ def validate(config: dict[str, object]) -> None:
     for name, provider in providers.items():
         if not isinstance(provider, dict):
             fail(f"provider '{name}' must be an object")
+
+    if providers.get("cliproxy") != CLIPROXY_PROVIDER:
+        fail("CLIProxy provider must use the required V2 OpenAI-compatible contract")
+
+    if config.get("model") != DEFAULT_MODEL:
+        fail("CLIProxy deployment default model must be cliproxy/deepseek-v4-flash")
 
     permissions = config.get("permissions")
     if not isinstance(permissions, list):
