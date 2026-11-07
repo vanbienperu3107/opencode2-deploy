@@ -35,13 +35,12 @@ jobs:
           CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
           OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
           OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
-          HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
           SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_HOST_VPN4_FINGERPRINT: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
         run: |
-          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HS_API_KEY SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
             test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
           done
           echo "required secrets present"
@@ -59,28 +58,8 @@ jobs:
           script: |
             true
 
-      - name: Create Tailscale pre-auth key for opencode2
-        id: ts_key
-        env:
-          HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
-          HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo "::error::headscale_user_id must be numeric"; exit 1; }
-          users=$(curl -sf -m 15 -H "Authorization: Bearer $HS_API_KEY" https://vpn2.hangocthanh.io.vn/api/v1/user)
-          printf '%s' "$users" | HEADSCALE_USER_ID="$HEADSCALE_USER_ID" python3 -c 'import json,os,sys; user_id=os.environ["HEADSCALE_USER_ID"]; users=json.load(sys.stdin).get("users") or []; sys.exit(0 if any(str(user.get("id")) == user_id for user in users) else 1)' \
-            || { echo "::error::requested Headscale user was not found"; exit 1; }
-          expiry=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
-          key=$(curl -sf -m 15 -X POST -H "Authorization: Bearer $HS_API_KEY" -H 'Content-Type: application/json' \
-            -d "{\"user\":\"$HEADSCALE_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
-            https://vpn2.hangocthanh.io.vn/api/v1/preauthkey \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("preAuthKey") or {}).get("key",""))')
-          test -n "$key" || { echo "::error::could not create pre-auth key"; exit 1; }
-          echo "::add-mask::$key"
-          echo "key=$key" >>"$GITHUB_OUTPUT"
-          echo "single-use pre-auth key created (expires in 1h)"
-
       - name: Deploy stack to vpn4
+        id: deploy
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.SSH_HOST_VPN4 }}
@@ -88,7 +67,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
           port: ${{ secrets.SSH_PORT || '22' }}
-          envs: REF,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS,TS_AUTHKEY
+          envs: REF,HEADSCALE_USER_ID,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS
           script_stop: true
           command_timeout: 15m
           script: |
@@ -105,6 +84,24 @@ jobs:
             $SUDO git checkout --detach -q "$REF"
             test "$($SUDO git rev-parse HEAD)" = "$REF"
             $SUDO docker network inspect edge >/dev/null 2>&1 || $SUDO docker network create edge
+
+            # This file is owned by the existing Headscale deployment. The API
+            # key stays on verified VPN4 and is never exported to the runner.
+            HEADSCALE_ENV=/opt/deployHeadscale/.env
+            $SUDO test -r "$HEADSCALE_ENV" || { echo 'Headscale runtime env is unavailable on vpn4' >&2; exit 1; }
+            HS_API_KEY=$($SUDO awk -F= '$1 == "HEADPLANE_HS_API_KEY" { sub(/^[^=]*=/, ""); print; exit }' "$HEADSCALE_ENV")
+            test -n "$HS_API_KEY" || { echo 'Headscale API key is unavailable on vpn4' >&2; exit 1; }
+            printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo 'headscale_user_id must be numeric' >&2; exit 1; }
+            users=$(curl -sf -m 15 -H "Authorization: Bearer $HS_API_KEY" https://vpn2.hangocthanh.io.vn/api/v1/user)
+            printf '%s' "$users" | HEADSCALE_USER_ID="$HEADSCALE_USER_ID" python3 -c 'import json,os,sys; user_id=os.environ["HEADSCALE_USER_ID"]; users=json.load(sys.stdin).get("users") or []; sys.exit(0 if any(str(user.get("id")) == user_id for user in users) else 1)' \
+              || { echo 'requested Headscale user was not found' >&2; exit 1; }
+            expiry=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
+            TS_AUTHKEY=$(curl -sf -m 15 -X POST -H "Authorization: Bearer $HS_API_KEY" -H 'Content-Type: application/json' \
+              -d "{\"user\":\"$HEADSCALE_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
+              https://vpn2.hangocthanh.io.vn/api/v1/preauthkey \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("preAuthKey") or {}).get("key",""))')
+            test -n "$TS_AUTHKEY" || { echo 'could not create Headscale pre-auth key on vpn4' >&2; exit 1; }
+
             # Tailscale ignores the auth key once its state volume holds an identity,
             # so redeploys keep the same Tailnet node.
             $SUDO env OUTPUT_DIR="$DEST" OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
@@ -127,6 +124,7 @@ jobs:
             echo "deployed $REF"
         env:
           REF: ${{ inputs.ref }}
+          HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}
           OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
           CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
           OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
