@@ -38,20 +38,19 @@ jobs:
           SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
-          SSH_HOST_VPN4_FINGERPRINT: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
         run: |
-          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY; do
             test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
           done
           echo "required secrets present"
 
-      - name: Preflight vpn4 SSH transport
+      # User accepted deploy-key-only transport verification; host-key pinning is intentionally disabled.
+      - name: Preflight vpn4 SSH transport (deploy-key only)
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.SSH_HOST_VPN4 }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
           port: ${{ secrets.SSH_PORT || '22' }}
           script_stop: true
           command_timeout: 1m
@@ -65,7 +64,6 @@ jobs:
           host: ${{ secrets.SSH_HOST_VPN4 }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
           port: ${{ secrets.SSH_PORT || '22' }}
           envs: REF,HEADSCALE_USER_ID,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS
           script_stop: true
