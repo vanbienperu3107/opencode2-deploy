@@ -99,7 +99,9 @@ does not already exist. It locks the new account's password before adding the
 exact key once. It **never repairs or provisions an existing `opencode` account**:
 when one exists, it fails before any mutation, including below that account's
 home directory. This also prevents `.ssh` or `authorized_keys` symlinks in an
-existing home from redirecting a root write. It refuses blank, private, and
+existing home from redirecting a root write. It also fails closed when the
+account database lookup is inconclusive, and it never reuses a leftover home
+directory left behind by a deleted account. It refuses blank, private, and
 non-Ed25519 key input. It does not copy, print, or create a private key.
 
 Build the pinned known-hosts content from a reviewed, private inventory created
