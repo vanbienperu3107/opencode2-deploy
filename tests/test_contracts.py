@@ -418,14 +418,14 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         preflight = workflow.index("- name: Check required secrets")
         transport = workflow.index("- name: Preflight vpn4 SSH transport")
-        create_key = workflow.index("- name: Create Tailscale pre-auth key for opencode2")
+        deploy = workflow.index("- name: Deploy stack to vpn4")
         self.assertLess(preflight, transport)
-        self.assertLess(transport, create_key)
+        self.assertLess(transport, deploy)
         for secret in ("SSH_HOST_VPN4", "SSH_USER", "SSH_KEY", "SSH_HOST_VPN4_FINGERPRINT"):
             self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", workflow)
-            self.assertIn(secret, workflow[preflight:create_key])
+            self.assertIn(secret, workflow[preflight:transport])
 
-        transport_step = workflow[transport:create_key]
+        transport_step = workflow[transport:deploy]
         self.assertIn("appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0", transport_step)
         self.assertIn("host: ${{ secrets.SSH_HOST_VPN4 }}", transport_step)
         self.assertIn("username: ${{ secrets.SSH_USER }}", transport_step)
@@ -447,6 +447,9 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("headscale_user_id:", workflow)
         self.assertIn("required: true", workflow[workflow.index("headscale_user_id:"):workflow.index("concurrency:")])
         self.assertIn("HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}", workflow)
+        self.assertIn("HEADSCALE_ENV=/opt/deployHeadscale/.env", workflow)
+        self.assertIn("HEADPLANE_HS_API_KEY", workflow)
+        self.assertNotIn("secrets.HEADPLANE_HS_API_KEY", workflow)
         self.assertIn("^[0-9]+$", workflow)
         self.assertNotIn('print(u[0]["id"] if u else "")', workflow)
         self.assertIn("requested Headscale user was not found", workflow)
