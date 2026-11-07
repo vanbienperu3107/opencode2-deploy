@@ -19,8 +19,22 @@ test -f "$renderer" || fail 'missing runtime env renderer'
 grep -Fq 'workflow_dispatch:' "$workflow" || fail 'deploy must be manually dispatched'
 grep -Fq 'permissions:' "$workflow" || fail 'deploy must declare token permissions'
 grep -Fq 'contents: read' "$workflow" || fail 'deploy token must stay read-only'
-for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HEADPLANE_HS_API_KEY SSH_KEY SSH_HOST_VPN4; do
+for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HEADPLANE_HS_API_KEY SSH_KEY SSH_HOST_VPN4 SSH_USER SSH_HOST_VPN4_FINGERPRINT; do
   grep -Fq "secrets.$secret" "$workflow" || fail "deploy does not consume $secret"
+done
+grep -Eq 'appleboy/ssh-action@[0-9a-f]{40}[[:space:]]+# v1\.2\.0' "$workflow" || fail 'deploy must pin appleboy ssh-action to the reviewed v1.2.0 commit'
+grep -Fq 'fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}' "$workflow" || fail 'deploy must verify the vpn4 SSH host fingerprint'
+grep -Fq 'headscale_user_id:' "$workflow" || fail 'deploy must require a Headscale user ID input'
+grep -Fq 'HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}' "$workflow" || fail 'deploy must bind the requested Headscale user ID'
+grep -Fq "'^[0-9]+$'" "$workflow" || fail 'deploy must validate the Headscale user ID as numeric'
+grep -Fq 'requested Headscale user was not found' "$workflow" || fail 'deploy must verify the requested Headscale user exists'
+grep -Fq '\"user\":\"$HEADSCALE_USER_ID\"' "$workflow" || fail 'deploy must create the pre-auth key for the requested Headscale user'
+preflight_line=$(grep -n -- '- name: Check required secrets' "$workflow" | cut -d: -f1)
+key_line=$(grep -n -- '- name: Create Tailscale pre-auth key for opencode2' "$workflow" | cut -d: -f1)
+test -n "$preflight_line" && test -n "$key_line" && test "$preflight_line" -lt "$key_line" || fail 'deploy must preflight SSH secrets before creating a pre-auth key'
+preflight=$(sed -n "${preflight_line},$((key_line - 1))p" "$workflow")
+for name in SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
+  grep -Fq "$name" <<<"$preflight" || fail "deploy preflight omits $name"
 done
 grep -Fq '::add-mask::' "$workflow" || fail 'generated Tailscale auth key must be masked'
 grep -Fq 'tag:' "$workflow" && fail 'deploy must not depend on mutable tags'

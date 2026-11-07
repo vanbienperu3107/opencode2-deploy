@@ -8,6 +8,9 @@ on:
       ref:
         description: Exact commit SHA of this repository to deploy
         required: true
+      headscale_user_id:
+        description: Numeric Headscale user ID that will own the one-hour pre-auth key
+        required: true
 
 concurrency:
   group: deploy-vpn4-host
@@ -33,8 +36,12 @@ jobs:
           OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
           OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
           HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
+          SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST_VPN4_FINGERPRINT: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
         run: |
-          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HS_API_KEY; do
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS HS_API_KEY SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
             test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
           done
           echo "required secrets present"
@@ -43,14 +50,16 @@ jobs:
         id: ts_key
         env:
           HS_API_KEY: ${{ secrets.HEADPLANE_HS_API_KEY }}
+          HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}
         run: |
           set -euo pipefail
+          printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo "::error::headscale_user_id must be numeric"; exit 1; }
           users=$(curl -sf -m 15 -H "Authorization: Bearer $HS_API_KEY" https://vpn2.hangocthanh.io.vn/api/v1/user)
-          user_id=$(printf '%s' "$users" | python3 -c 'import json,sys; u=json.load(sys.stdin).get("users") or []; print(u[0]["id"] if u else "")')
-          test -n "$user_id" || { echo "::error::no headscale user available"; exit 1; }
+          printf '%s' "$users" | HEADSCALE_USER_ID="$HEADSCALE_USER_ID" python3 -c 'import json,os,sys; user_id=os.environ["HEADSCALE_USER_ID"]; users=json.load(sys.stdin).get("users") or []; sys.exit(0 if any(str(user.get("id")) == user_id for user in users) else 1)' \
+            || { echo "::error::requested Headscale user was not found"; exit 1; }
           expiry=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
           key=$(curl -sf -m 15 -X POST -H "Authorization: Bearer $HS_API_KEY" -H 'Content-Type: application/json' \
-            -d "{\"user\":\"$user_id\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
+            -d "{\"user\":\"$HEADSCALE_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
             https://vpn2.hangocthanh.io.vn/api/v1/preauthkey \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("preAuthKey") or {}).get("key",""))')
           test -n "$key" || { echo "::error::could not create pre-auth key"; exit 1; }
@@ -59,11 +68,12 @@ jobs:
           echo "single-use pre-auth key created (expires in 1h)"
 
       - name: Deploy stack to vpn4
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         with:
           host: ${{ secrets.SSH_HOST_VPN4 }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
           port: ${{ secrets.SSH_PORT || '22' }}
           envs: REF,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS,TS_AUTHKEY
           script_stop: true

@@ -154,8 +154,24 @@ artifacts.
 
 ## Deployment and rollback boundary
 
-Do not run a deployment from this repository yet. A later, reviewed workflow
-will verify nonempty secrets, render runtime-only SSH material, validate this
-Compose contract, and start the services without deleting volumes. Until then,
-rollback means reverting the repository change; it must not affect an existing
-service or edge route.
+The manual `Deploy OpenCode v2 (vpn4)` workflow requires two non-secret inputs:
+`ref` (the exact 40-character commit SHA to deploy) and `headscale_user_id` (the
+numeric Headscale user ID that must own the one-hour pre-auth key). It rejects a
+non-numeric ID and queries Headscale to confirm that the requested ID exists
+before creating the key; it never chooses the first user returned by the API.
+The generated key remains non-reusable and non-ephemeral and expires after one
+hour.
+
+Before requesting the pre-auth key, the workflow fail-closes on absent runtime
+secrets, including `SSH_HOST_VPN4`, `SSH_USER`, `SSH_KEY`, and
+`SSH_HOST_VPN4_FINGERPRINT`. The latter is the reviewed SHA256 host-key
+fingerprint for vpn4 and is supplied to the pinned
+`appleboy/ssh-action` commit, so host-key verification happens before the
+workflow sends runtime secrets over SSH. Configure that fingerprint in the
+repository secret store through an approved out-of-band verification process;
+do not invent or commit a value.
+
+The workflow renders runtime-only SSH material, validates this Compose contract,
+and starts the services without deleting volumes. Rollback means manually
+dispatching the same workflow with an earlier reviewed commit SHA; it must not
+affect an existing service, edge route, or persistent volume.
