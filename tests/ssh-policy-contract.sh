@@ -107,6 +107,9 @@ mkdir -p "$fake_bin" "$fake_home"
 
 cat >"$fake_bin/getent" <<'EOF'
 #!/usr/bin/env bash
+if test -n "${FAKE_GETENT_STATUS:-}"; then
+  exit "$FAKE_GETENT_STATUS"
+fi
 if test "$1" = passwd && test "$2" = opencode && test -f "$FAKE_ACCOUNT_STATE"; then
   printf 'opencode:x:%s:1001::%s:%s\n' "${FAKE_ACCOUNT_UID:-1001}" "$FAKE_ACCOUNT_HOME" "${FAKE_ACCOUNT_SHELL:-/bin/bash}"
   exit 0
@@ -190,6 +193,22 @@ mkdir -p "$authorized_keys_symlink_home/.ssh" "$(dirname "$authorized_keys_symli
 ln -s "$authorized_keys_symlink_target" "$authorized_keys_symlink_home/.ssh/authorized_keys"
 assert_existing_account_refusal_has_no_side_effects 'authorized_keys symlink' "$authorized_keys_symlink_home"
 test ! -e "$authorized_keys_symlink_target" || fail 'authorized_keys symlink wrote outside the existing account home before refusal'
+
+for lookup_status in 1 3; do
+  rm -f "$test_root/fake-account"
+  : >"$fake_log"
+  lookup_home="$test_root/lookup-error-$lookup_status/opencode"
+  if PATH="$fake_bin:$PATH" \
+    FAKE_GETENT_STATUS="$lookup_status" \
+    FAKE_ACCOUNT_HOME="$lookup_home" \
+    FAKE_ACCOUNT_STATE="$test_root/fake-account" \
+    FAKE_MUTATION_LOG="$fake_log" \
+    bash "$provision_script" --public-key-file "$test_root/test_key.pub" >/dev/null 2>&1; then
+    fail "account lookup error $lookup_status was treated as an absent account"
+  fi
+  test ! -s "$fake_log" || fail "account lookup error $lookup_status performed a root mutation"
+  test ! -e "$lookup_home" || fail "account lookup error $lookup_status created a home directory"
+done
 
 grep -Fxq '      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2' "$ci_workflow" || fail 'CI checkout is not pinned to the approved v4.2.2 SHA'
 grep -Fxq '          bash tests/ssh-policy-contract.sh' "$ci_workflow" || fail 'CI does not run the SSH policy contract'

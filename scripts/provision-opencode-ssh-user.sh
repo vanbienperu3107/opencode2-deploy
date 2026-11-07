@@ -79,9 +79,16 @@ case "$key_type" in
 esac
 printf '%s\n' "$public_key" | ssh-keygen -lf - >/dev/null 2>&1 || fail 'public key is invalid'
 
-if getent passwd "$account_name" >/dev/null; then
-  fail 'refusing to modify an existing opencode account'
-fi
+# getent exits 0 when the entry exists and 2 when it is definitively absent.
+# Any other status means the account database could not be queried, so the
+# account state is unknown and no root mutation may happen.
+lookup_status=0
+getent passwd "$account_name" >/dev/null || lookup_status=$?
+case "$lookup_status" in
+  0) fail 'refusing to modify an existing opencode account' ;;
+  2) ;;
+  *) fail 'cannot determine whether the opencode account exists' ;;
+esac
 
 useradd --create-home --user-group --shell /bin/bash "$account_name"
 account_record=$(getent passwd "$account_name")
