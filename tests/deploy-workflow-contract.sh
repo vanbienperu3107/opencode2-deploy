@@ -19,11 +19,11 @@ test -f "$renderer" || fail 'missing runtime env renderer'
 grep -Fq 'workflow_dispatch:' "$workflow" || fail 'deploy must be manually dispatched'
 grep -Fq 'permissions:' "$workflow" || fail 'deploy must declare token permissions'
 grep -Fq 'contents: read' "$workflow" || fail 'deploy token must stay read-only'
-for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_KEY SSH_HOST_VPN4 SSH_USER SSH_HOST_VPN4_FINGERPRINT; do
+for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_KEY SSH_HOST_VPN4 SSH_USER; do
   grep -Fq "secrets.$secret" "$workflow" || fail "deploy does not consume $secret"
 done
 grep -Eq 'appleboy/ssh-action@[0-9a-f]{40}[[:space:]]+# v1\.2\.0' "$workflow" || fail 'deploy must pin appleboy ssh-action to the reviewed v1.2.0 commit'
-grep -Fq 'fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}' "$workflow" || fail 'deploy must verify the vpn4 SSH host fingerprint'
+! grep -Fq 'fingerprint:' "$workflow" || fail 'deploy transport must not use a host fingerprint after user-approved bypass'
 grep -Fq 'headscale_user_id:' "$workflow" || fail 'deploy must require a Headscale user ID input'
 grep -Fq 'HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}' "$workflow" || fail 'deploy must bind the requested Headscale user ID'
 grep -Fq 'HEADSCALE_ENV=/opt/deployHeadscale/.env' "$workflow" || fail 'deploy must read the existing Headscale env only on vpn4'
@@ -39,11 +39,11 @@ test -n "$preflight_line" && test -n "$transport_line" && test -n "$deploy_line"
 preflight=$(sed -n "${preflight_line},$((transport_line - 1))p" "$workflow")
 transport=$(sed -n "${transport_line},$((deploy_line - 1))p" "$workflow")
 grep -Fq 'appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0' <<<"$transport" || fail 'SSH transport preflight must use the pinned action'
-for value in 'host: ${{ secrets.SSH_HOST_VPN4 }}' 'username: ${{ secrets.SSH_USER }}' 'key: ${{ secrets.SSH_KEY }}' 'fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}'; do
+for value in 'host: ${{ secrets.SSH_HOST_VPN4 }}' 'username: ${{ secrets.SSH_USER }}' 'key: ${{ secrets.SSH_KEY }}'; do
   grep -Fq "$value" <<<"$transport" || fail 'SSH transport preflight is missing a pinned transport input'
 done
 grep -Fxq '            true' <<<"$transport" || fail 'SSH transport preflight must execute harmless true'
-for name in SSH_HOST_VPN4 SSH_USER SSH_KEY SSH_HOST_VPN4_FINGERPRINT; do
+for name in SSH_HOST_VPN4 SSH_USER SSH_KEY; do
   grep -Fq "$name" <<<"$preflight" || fail "deploy preflight omits $name"
 done
 ! grep -Fq 'GITHUB_OUTPUT' "$workflow" || fail 'remote-only Tailscale auth key must not return to the GitHub runner'

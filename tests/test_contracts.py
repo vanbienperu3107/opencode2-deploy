@@ -414,14 +414,14 @@ class WorkflowPinTests(unittest.TestCase):
 
 
 class DeployWorkflowSecurityTests(unittest.TestCase):
-    def test_preflights_ssh_target_identity_and_fingerprint_before_creating_preauth_key(self) -> None:
+    def test_preflights_deploy_key_transport_before_creating_preauth_key(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         preflight = workflow.index("- name: Check required secrets")
         transport = workflow.index("- name: Preflight vpn4 SSH transport")
         deploy = workflow.index("- name: Deploy stack to vpn4")
         self.assertLess(preflight, transport)
         self.assertLess(transport, deploy)
-        for secret in ("SSH_HOST_VPN4", "SSH_USER", "SSH_KEY", "SSH_HOST_VPN4_FINGERPRINT"):
+        for secret in ("SSH_HOST_VPN4", "SSH_USER", "SSH_KEY"):
             self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", workflow)
             self.assertIn(secret, workflow[preflight:transport])
 
@@ -430,17 +430,17 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("host: ${{ secrets.SSH_HOST_VPN4 }}", transport_step)
         self.assertIn("username: ${{ secrets.SSH_USER }}", transport_step)
         self.assertIn("key: ${{ secrets.SSH_KEY }}", transport_step)
-        self.assertIn("fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}", transport_step)
+        self.assertNotIn("fingerprint:", transport_step)
         self.assertIn("script: |\n            true", transport_step)
 
-    def test_uses_pinned_ssh_action_and_verifies_vpn4_host_fingerprint(self) -> None:
+    def test_uses_pinned_ssh_action_without_host_fingerprint_after_user_approved_bypass(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             "appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0",
             workflow,
         )
         self.assertNotIn("appleboy/ssh-action@v1.2.0", workflow)
-        self.assertIn("fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}", workflow)
+        self.assertNotIn("fingerprint:", workflow)
 
     def test_creates_preauth_key_only_for_the_requested_numeric_headscale_user(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
