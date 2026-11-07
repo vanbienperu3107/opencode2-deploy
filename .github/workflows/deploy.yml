@@ -46,6 +46,19 @@ jobs:
           done
           echo "required secrets present"
 
+      - name: Preflight vpn4 SSH transport
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST_VPN4 }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          script_stop: true
+          command_timeout: 1m
+          script: |
+            true
+
       - name: Create Tailscale pre-auth key for opencode2
         id: ts_key
         env:
@@ -99,9 +112,10 @@ jobs:
               OPENCODE_SSH_PRIVATE_KEY="$OPENCODE_SSH_PRIVATE_KEY" \
               OPENCODE_SSH_KNOWN_HOSTS="$OPENCODE_SSH_KNOWN_HOSTS" \
               bash scripts/render-runtime-env.sh
-            $SUDO docker compose --env-file "$DEST/.env" -p opencode2-deploy config -q
-            $SUDO docker compose --env-file "$DEST/.env" -p opencode2-deploy pull -q
-            $SUDO docker compose --env-file "$DEST/.env" -p opencode2-deploy up -d --remove-orphans
+            RUNTIME_ENV="$DEST/current/.env"
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy config -q
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy pull -q
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy up -d --remove-orphans
             for i in $(seq 1 30); do
               state=$($SUDO docker inspect -f '{{.State.Health.Status}}' opencode2-deploy-opencode2-1 2>/dev/null || echo starting)
               echo "  opencode2 health: $state"

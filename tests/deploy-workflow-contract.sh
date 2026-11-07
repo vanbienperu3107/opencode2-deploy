@@ -24,6 +24,15 @@ for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY
 done
 grep -Eq 'appleboy/ssh-action@[0-9a-f]{40}[[:space:]]+# v1\.2\.0' "$workflow" || fail 'deploy must pin appleboy ssh-action to the reviewed v1.2.0 commit'
 grep -Fq 'fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}' "$workflow" || fail 'deploy must verify the vpn4 SSH host fingerprint'
+transport_line=$(grep -n -- '- name: Preflight vpn4 SSH transport' "$workflow" | cut -d: -f1)
+key_line=$(grep -n -- '- name: Create Tailscale pre-auth key for opencode2' "$workflow" | cut -d: -f1)
+test -n "$transport_line" && test -n "$key_line" && test "$transport_line" -lt "$key_line" || fail 'deploy must establish SSH transport before minting a pre-auth key'
+transport=$(sed -n "${transport_line},$((key_line - 1))p" "$workflow")
+grep -Fq 'appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0' <<<"$transport" || fail 'SSH transport preflight must use the pinned appleboy action'
+for value in 'host: ${{ secrets.SSH_HOST_VPN4 }}' 'username: ${{ secrets.SSH_USER }}' 'key: ${{ secrets.SSH_KEY }}' 'fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}'; do
+  grep -Fq "$value" <<<"$transport" || fail 'SSH transport preflight is missing a pinned transport input'
+done
+grep -Fxq '            true' <<<"$transport" || fail 'SSH transport preflight must execute harmless true'
 grep -Fq 'headscale_user_id:' "$workflow" || fail 'deploy must require a Headscale user ID input'
 grep -Fq 'HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}' "$workflow" || fail 'deploy must bind the requested Headscale user ID'
 grep -Fq "'^[0-9]+$'" "$workflow" || fail 'deploy must validate the Headscale user ID as numeric'
@@ -65,9 +74,32 @@ env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   OPENCODE_SSH_PRIVATE_KEY='contract-ssh-private-key' \
   OPENCODE_SSH_KNOWN_HOSTS='contract-known-hosts' \
   bash "$renderer" >"$test_root/stdout" 2>&1 || fail 'renderer rejected complete secrets'
-test "$(stat -c '%a' "$test_root/out/.env")" = '600' || fail 'runtime env must be mode 0600'
-grep -Fxq 'OPENCODE_SERVER_USERNAME=opencode' "$test_root/out/.env" || fail 'runtime env must pin the documented default username'
-grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$test_root/out/.env" || fail 'runtime env lost the password'
+current="$test_root/out/current"
+test -L "$current" || fail 'runtime renderer must publish an atomic current generation pointer'
+generation=$(readlink -f "$current")
+test "$(stat -c '%a' "$generation")" = '700' || fail 'runtime generation directory must be mode 0700'
+test "$(stat -c '%a' "$generation/.env")" = '600' || fail 'runtime env must be mode 0600'
+test "$(stat -c '%a' "$generation/opencode_ssh_key")" = '600' || fail 'SSH key must be mode 0600'
+test "$(stat -c '%a' "$generation/opencode_known_hosts")" = '600' || fail 'known hosts must be mode 0600'
+grep -Fxq 'OPENCODE_SERVER_USERNAME=opencode' "$generation/.env" || fail 'runtime env must pin the documented default username'
+grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'runtime env lost the password'
+grep -Fxq "OPENCODE_SSH_KEY_FILE=$current/opencode_ssh_key" "$generation/.env" || fail 'runtime env must reference the current-generation SSH key'
+grep -Fxq "OPENCODE_SSH_KNOWN_HOSTS_FILE=$current/opencode_known_hosts" "$generation/.env" || fail 'runtime env must reference the current-generation known hosts'
+
+# Failure during the second secret publish must not alter the currently live generation.
+previous_target=$(readlink "$current")
+if env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" RENDER_RUNTIME_ENV_FAIL_ON_SECOND_SECRET_WRITE=1 \
+  OPENCODE_SERVER_PASSWORD='next-password' \
+  CLIPROXY_API_KEY='next-cliproxy' \
+  TS_AUTHKEY='next-authkey' \
+  OPENCODE_SSH_PRIVATE_KEY='next-ssh-private-key' \
+  OPENCODE_SSH_KNOWN_HOSTS='next-known-hosts' \
+  bash "$renderer" >/dev/null 2>&1; then
+  fail 'renderer did not fail when the second secret publish was injected to fail'
+fi
+test "$(readlink "$current")" = "$previous_target" || fail 'failed generation replaced the live current pointer'
+test "$(readlink -f "$current")" = "$generation" || fail 'failed generation changed the live generation'
+grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'failed generation changed existing env material'
 if grep -Eq 'contract-(password|cliproxy|authkey)' "$test_root/stdout"; then
   fail 'renderer printed a secret value'
 fi

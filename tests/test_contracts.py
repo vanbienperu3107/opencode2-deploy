@@ -417,11 +417,21 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
     def test_preflights_ssh_target_identity_and_fingerprint_before_creating_preauth_key(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         preflight = workflow.index("- name: Check required secrets")
+        transport = workflow.index("- name: Preflight vpn4 SSH transport")
         create_key = workflow.index("- name: Create Tailscale pre-auth key for opencode2")
-        self.assertLess(preflight, create_key)
+        self.assertLess(preflight, transport)
+        self.assertLess(transport, create_key)
         for secret in ("SSH_HOST_VPN4", "SSH_USER", "SSH_KEY", "SSH_HOST_VPN4_FINGERPRINT"):
             self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", workflow)
             self.assertIn(secret, workflow[preflight:create_key])
+
+        transport_step = workflow[transport:create_key]
+        self.assertIn("appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0", transport_step)
+        self.assertIn("host: ${{ secrets.SSH_HOST_VPN4 }}", transport_step)
+        self.assertIn("username: ${{ secrets.SSH_USER }}", transport_step)
+        self.assertIn("key: ${{ secrets.SSH_KEY }}", transport_step)
+        self.assertIn("fingerprint: ${{ secrets.SSH_HOST_VPN4_FINGERPRINT }}", transport_step)
+        self.assertIn("script: |\n            true", transport_step)
 
     def test_uses_pinned_ssh_action_and_verifies_vpn4_host_fingerprint(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
@@ -452,6 +462,9 @@ class RuntimeComposeContractTests(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("docker compose --env-file tests/compose-ci.env config --format json", script)
         self.assertIn("python3 tests/compose-contract.py", script)
+        deploy_workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('RUNTIME_ENV="$DEST/current/.env"', deploy_workflow)
+        self.assertIn('docker compose --env-file "$RUNTIME_ENV"', deploy_workflow)
         self.assertIn("bash tests/compose-contract.sh", workflow)
 
     @staticmethod

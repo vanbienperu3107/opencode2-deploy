@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-# Writes the Compose runtime env file atomically with mode 0600. Secret values
-# come only from the environment and are never printed.
+# Writes .env and SSH material together into a private generation, then atomically
+# swaps current to that completed generation. Secret values are never printed.
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
@@ -19,30 +19,30 @@ for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY TS_AUTHKEY OPENCODE_SSH_PR
   esac
 done
 
-mkdir -p "$output_dir"
+mkdir -p "$output_dir/generations"
 umask 077
-staging=$(mktemp "$output_dir/.env.XXXXXX")
-trap 'rm -f "$staging"' EXIT
+generation=$(mktemp -d "$output_dir/generations/.pending.XXXXXX")
+trap 'rm -rf "$generation"' EXIT
+chmod 0700 "$generation"
+current="$output_dir/current"
+
 {
   printf 'OPENCODE_SERVER_USERNAME=opencode\n'
   printf 'OPENCODE_SERVER_PASSWORD=%s\n' "$OPENCODE_SERVER_PASSWORD"
   printf 'CLIPROXY_API_KEY=%s\n' "$CLIPROXY_API_KEY"
   printf 'TS_AUTHKEY=%s\n' "$TS_AUTHKEY"
-  printf 'OPENCODE_SSH_KEY_FILE=%s/opencode_ssh_key\n' "$output_dir"
-  printf 'OPENCODE_SSH_KNOWN_HOSTS_FILE=%s/opencode_known_hosts\n' "$output_dir"
-} >"$staging"
-chmod 0600 "$staging"
-mv "$staging" "$output_dir/.env"
+  printf 'OPENCODE_SSH_KEY_FILE=%s/opencode_ssh_key\n' "$current"
+  printf 'OPENCODE_SSH_KNOWN_HOSTS_FILE=%s/opencode_known_hosts\n' "$current"
+} >"$generation/.env"
+printf '%s\n' "$OPENCODE_SSH_PRIVATE_KEY" >"$generation/opencode_ssh_key"
+test "${RENDER_RUNTIME_ENV_FAIL_ON_SECOND_SECRET_WRITE:-}" != 1 || fail 'injected failure before second secret write'
+printf '%s\n' "$OPENCODE_SSH_KNOWN_HOSTS" >"$generation/opencode_known_hosts"
+chmod 0600 "$generation/.env" "$generation/opencode_ssh_key" "$generation/opencode_known_hosts"
 
-for secret_file in opencode_ssh_key opencode_known_hosts; do
-  case "$secret_file" in
-    opencode_ssh_key) secret_value=$OPENCODE_SSH_PRIVATE_KEY ;;
-    opencode_known_hosts) secret_value=$OPENCODE_SSH_KNOWN_HOSTS ;;
-  esac
-  secret_staging=$(mktemp "$output_dir/.${secret_file}.XXXXXX")
-  printf '%s\n' "$secret_value" >"$secret_staging"
-  chmod 0600 "$secret_staging"
-  mv "$secret_staging" "$output_dir/$secret_file"
-done
+published_generation="$output_dir/generations/$(basename "$generation" | sed 's/^\.pending\.//')"
+mv "$generation" "$published_generation"
+next_current="$output_dir/.current.XXXXXX"
+ln -s "generations/$(basename "$published_generation")" "$next_current"
+mv -T "$next_current" "$current"
 trap - EXIT
-printf 'Rendered runtime env and SSH material (mode 0600)\n'
+printf 'Rendered runtime generation (directory mode 0700; files mode 0600)\n'
