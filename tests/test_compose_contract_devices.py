@@ -24,7 +24,7 @@ def rendered_compose() -> dict[str, object]:
                 "devices": [{"path": "/dev/net/tun", "cgroup_permissions": "rwm"}],
                 "cap_add": ["NET_ADMIN"],
                 "volumes": [{"type": "volume", "source": "opencode2_tailscale_state", "target": "/var/lib/tailscale"}],
-                "networks": {"edge": None},
+                "networks": {"edge": {"aliases": ["opencode2"]}},
             },
             "opencode2": {
                 "image": "ghcr.io/anomalyco/opencode:2.0.32",
