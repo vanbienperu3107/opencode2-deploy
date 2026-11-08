@@ -29,6 +29,10 @@ mkdir -p "$test_root/one"
 printf 'HEADPLANE_HS_API_KEY=%s\n' "$secret" >"$test_root/one/.env"
 test "$(env HEADSCALE_ENV_ROOT="$test_root/one" bash "$reader")" = "$secret" || fail 'single credential source was not read'
 
+mkdir -p "$test_root/nested/ui-preview/opencode2"
+printf 'HEADPLANE_HS_API_KEY=%s\n' "$secret" >"$test_root/nested/ui-preview/opencode2/.env"
+test "$(env HEADSCALE_ENV_ROOT="$test_root/nested" bash "$reader")" = "$secret" || fail 'nested credential source within the allowed depth was not read'
+
 mkdir -p "$test_root/multiple/child"
 printf 'HEADPLANE_HS_API_KEY=%s\n' "$secret" >"$test_root/multiple/.env"
 printf 'HEADPLANE_HS_API_KEY=other\n' >"$test_root/multiple/child/.env"
