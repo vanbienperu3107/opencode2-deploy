@@ -23,7 +23,7 @@ services:
           - opencode2
 
   opencode2:
-    image: ghcr.io/anomalyco/opencode:2.0.32
+    image: ghcr.io/anomalyco/opencode:2.2.6
     command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
     restart: unless-stopped
     init: true
