@@ -207,15 +207,7 @@ jobs:
 
             echo "== client IP provenance"
             $SUDO docker exec caddy-edge sh -c 'tail -n 400 /var/log/caddy/opencode2-access.log' \
-              | python3 -c 'import json,sys,ipaddress,collections
-            c=collections.Counter()
-            for line in sys.stdin:
-                try: r=json.loads(line)["request"]
-                except Exception: continue
-                for k in ("remote_ip","client_ip"):
-                    ip=ipaddress.ip_address(r.get(k) or "0.0.0.0")
-                    c[(k, "private" if ip.is_private else "public")]+=1
-            print(dict(c))'
+              | python3 -c 'import json,sys,ipaddress,collections; c=collections.Counter((k, "private" if ipaddress.ip_address(json.loads(l)["request"].get(k) or "0.0.0.0").is_private else "public") for l in sys.stdin if l.startswith("{") for k in ("remote_ip","client_ip")); print(dict(c))'
             $SUDO docker inspect -f 'nginx network_mode={{.HostConfig.NetworkMode}} ports={{json .HostConfig.PortBindings}}' edge-nginx
             $SUDO docker inspect -f 'nginx ips={{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' edge-nginx | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/g'
             $SUDO docker logs --tail 40 edge-nginx 2>&1 | grep 'sni=opencode2' | awk '{print $1}' | python3 -c 'import sys,ipaddress,collections; print("nginx remote_addr classes:", dict(collections.Counter("private" if ipaddress.ip_address(l.strip()).is_private else "public" for l in sys.stdin if l.strip())))'
