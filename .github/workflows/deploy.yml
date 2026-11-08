@@ -8,9 +8,6 @@ on:
       ref:
         description: Exact commit SHA of this repository to deploy
         required: true
-      headscale_user_id:
-        description: Numeric Headscale user ID that will own the one-hour pre-auth key
-        required: true
 
 concurrency:
   group: deploy-vpn4-host
@@ -38,10 +35,12 @@ jobs:
           SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
-          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY; do
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY TS_AUTHKEY; do
             test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
           done
+          printf '%s' "$TS_AUTHKEY" | grep -Eq '^[A-Za-z0-9_-]+$' || { echo "::error::TS_AUTHKEY has an invalid format"; exit 1; }
           echo "required secrets present"
 
       # User accepted deploy-key-only transport verification; host-key pinning is intentionally disabled.
@@ -65,7 +64,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || '22' }}
-          envs: REF,HEADSCALE_USER_ID,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS
+          envs: REF,TS_AUTHKEY,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS
           script_stop: true
           command_timeout: 15m
           script: |
@@ -83,20 +82,9 @@ jobs:
             test "$($SUDO git rev-parse HEAD)" = "$REF"
             $SUDO docker network inspect edge >/dev/null 2>&1 || $SUDO docker network create edge
 
-            # The established Headscale deployment owns this credential. The
-            # helper accepts exactly one regular local .env source and never
-            # prints its path or key on failure.
-            HS_API_KEY=$($SUDO bash scripts/read-headplane-api-key.sh)
-            printf '%s' "$HEADSCALE_USER_ID" | grep -Eq '^[0-9]+$' || { echo 'headscale_user_id must be numeric' >&2; exit 1; }
-            users=$(curl -sf -m 15 -H "Authorization: Bearer $HS_API_KEY" https://vpn2.hangocthanh.io.vn/api/v1/user)
-            printf '%s' "$users" | HEADSCALE_USER_ID="$HEADSCALE_USER_ID" python3 -c 'import json,os,sys; user_id=os.environ["HEADSCALE_USER_ID"]; users=json.load(sys.stdin).get("users") or []; sys.exit(0 if any(str(user.get("id")) == user_id for user in users) else 1)' \
-              || { echo 'requested Headscale user was not found' >&2; exit 1; }
-            expiry=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)
-            TS_AUTHKEY=$(curl -sf -m 15 -X POST -H "Authorization: Bearer $HS_API_KEY" -H 'Content-Type: application/json' \
-              -d "{\"user\":\"$HEADSCALE_USER_ID\",\"reusable\":false,\"ephemeral\":false,\"expiration\":\"$expiry\"}" \
-              https://vpn2.hangocthanh.io.vn/api/v1/preauthkey \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("preAuthKey") or {}).get("key",""))')
-            test -n "$TS_AUTHKEY" || { echo 'could not create Headscale pre-auth key on vpn4' >&2; exit 1; }
+            # The pre-auth key is supplied by the operator through the TS_AUTHKEY
+            # secret; it is only used on the first join while the state volume is empty.
+            printf '%s' "$TS_AUTHKEY" | grep -Eq '^[A-Za-z0-9_-]+$' || { echo 'TS_AUTHKEY has an invalid format' >&2; exit 1; }
 
             # Tailscale ignores the auth key once its state volume holds an identity,
             # so redeploys keep the same Tailnet node.
@@ -120,12 +108,11 @@ jobs:
             echo "deployed $REF"
         env:
           REF: ${{ inputs.ref }}
-          HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}
           OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
           CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
           OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
           OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
-          TS_AUTHKEY: ${{ steps.ts_key.outputs.key }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
 
       - name: Verify public endpoint requires authentication
         env:

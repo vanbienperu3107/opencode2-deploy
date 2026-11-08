@@ -442,20 +442,17 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         self.assertNotIn("appleboy/ssh-action@v1.2.0", workflow)
         self.assertNotIn("fingerprint:", workflow)
 
-    def test_creates_preauth_key_only_for_the_requested_numeric_headscale_user(self) -> None:
+    def test_uses_preauth_key_from_github_secret(self) -> None:
         workflow = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("headscale_user_id:", workflow)
-        self.assertIn("required: true", workflow[workflow.index("headscale_user_id:"):workflow.index("concurrency:")])
-        self.assertIn("HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}", workflow)
-        self.assertIn("read-headplane-api-key.sh", workflow)
-        self.assertIn("-maxdepth 3", (REPOSITORY / "scripts" / "read-headplane-api-key.sh").read_text(encoding="utf-8"))
-        self.assertNotIn("secrets.HEADPLANE_HS_API_KEY", workflow)
-        self.assertIn("^[0-9]+$", workflow)
-        self.assertNotIn('print(u[0]["id"] if u else "")', workflow)
-        self.assertIn("requested Headscale user was not found", workflow)
-        self.assertIn('\\"user\\":\\"$HEADSCALE_USER_ID\\"', workflow)
-        self.assertIn('\\"reusable\\":false,\\"ephemeral\\":false', workflow)
-        self.assertIn("+1 hour", workflow)
+        self.assertIn("TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}", workflow)
+        self.assertIn("TS_AUTHKEY", workflow[workflow.index("- name: Check required secrets"):workflow.index("- name: Preflight vpn4 SSH transport")])
+        self.assertIn("envs: REF,TS_AUTHKEY,", workflow)
+        self.assertNotIn("read-headplane-api-key.sh", workflow)
+        self.assertNotIn("/api/v1/preauthkey", workflow)
+        self.assertNotIn("HS_API_KEY", workflow)
+        self.assertNotIn("headscale_user_id", workflow)
+        self.assertNotIn("steps.ts_key", workflow)
+        self.assertIn("'^[A-Za-z0-9_-]+$'", workflow)
 
 
 class RuntimeComposeContractTests(unittest.TestCase):
