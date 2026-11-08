@@ -37,7 +37,7 @@ def rendered_compose() -> dict[str, object]:
                 "configs": [{"source": "opencode-config", "target": "/etc/opencode/opencode.jsonc", "mode": 0o444}],
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
-                "healthcheck": {"test": ["CMD-SHELL", "wget -q -O /dev/null --header \"Authorization: Basic $$TOKEN\" http://127.0.0.1:4096/api/global/health"]},
+                "healthcheck": {"test": ["CMD-SHELL", "wget -q -O /dev/null --header \"Authorization: Basic $$TOKEN\" http://127.0.0.1:4096/api/info"]},
             },
         },
     }

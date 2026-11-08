@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           # OpenCode 2.x serves the web UI shell (200 text/html) on every
           # non-/api path; only the /api prefix proves Basic Auth is enforced.
-          url=https://opencode2.hangocthanh.io.vn/api/global/health
+          url=https://opencode2.hangocthanh.io.vn/api/info
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)
             echo "  unauthenticated -> ${code:-000}"
@@ -133,4 +133,4 @@ jobs:
           echo "  authenticated -> $code ($ctype)"
           [ "$code" = 200 ] || { echo "::error::authenticated health failed"; exit 1; }
           case "$ctype" in application/json*) ;; *) echo "::error::health did not return application/json"; exit 1;; esac
-          python3 -c 'import json; d=json.load(open("/tmp/health.json")); print("healthy=%s version=%s" % (d.get("healthy"), d.get("version")))'
+          python3 -c 'import json; d=json.load(open("/tmp/health.json")); v=d.get("version"); assert v, "missing version"; print("version=%s" % v)'

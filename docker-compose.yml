@@ -57,7 +57,7 @@ services:
     healthcheck:
       # BusyBox wget does not send URL-embedded credentials, so build the Basic
       # header from the container environment at check time.
-      test: ["CMD-SHELL", "wget -q -O /dev/null --header \"Authorization: Basic $$(printf '%s:%s' \"$$OPENCODE_SERVER_USERNAME\" \"$$OPENCODE_SERVER_PASSWORD\" | base64 | tr -d '\\n')\" http://127.0.0.1:4096/api/global/health"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header \"Authorization: Basic $$(printf '%s:%s' \"$$OPENCODE_SERVER_USERNAME\" \"$$OPENCODE_SERVER_PASSWORD\" | base64 | tr -d '\\n')\" http://127.0.0.1:4096/api/info"]
       interval: 30s
       timeout: 5s
       retries: 5
