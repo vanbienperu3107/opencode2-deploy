@@ -30,6 +30,9 @@ grep -Fq 'TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}' "$workflow" || fail 'deploy mus
 ! grep -Fq 'secrets.HEADPLANE_HS_API_KEY' "$workflow" || fail 'deploy must not transfer a Headscale API key'
 ! grep -Fq 'headscale_user_id' "$workflow" || fail 'deploy must not require an unused Headscale user input'
 grep -Fq "'^[A-Za-z0-9_-]+$'" "$workflow" || fail 'deploy must validate the pre-auth key shape before sending it'
+# appleboy/ssh-action script_stop checks every line's exit status, so a loop
+# guard written as `[ ... ] && break` aborts the deploy on its first false test.
+! grep -Eq '\][[:space:]]*&&[[:space:]]*(break|continue)' "$workflow" || fail 'deploy loops must use if/then guards because script_stop aborts on a false && test'
 preflight_line=$(grep -n -- '- name: Check required secrets' "$workflow" | cut -d: -f1)
 transport_line=$(grep -n -- '- name: Preflight vpn4 SSH transport' "$workflow" | cut -d: -f1)
 deploy_line=$(grep -n -- '- name: Deploy stack to vpn4' "$workflow" | cut -d: -f1)

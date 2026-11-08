@@ -100,7 +100,7 @@ jobs:
             for i in $(seq 1 30); do
               state=$($SUDO docker inspect -f '{{.State.Health.Status}}' opencode2-deploy-opencode2-1 2>/dev/null || echo starting)
               echo "  opencode2 health: $state"
-              [ "$state" = healthy ] && break
+              if [ "$state" = healthy ]; then break; fi
               sleep 5
             done
             [ "$state" = healthy ] || { $SUDO docker compose -p opencode2-deploy logs --tail 60; exit 1; }
@@ -123,7 +123,7 @@ jobs:
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)
             echo "  unauthenticated -> ${code:-000}"
-            [ "$code" = 401 ] && break
+            if [ "$code" = 401 ]; then break; fi
             sleep 6
           done
           [ "$code" = 401 ] || { echo "::error::expected 401 without credentials, got $code"; exit 1; }
