@@ -20,7 +20,7 @@ while IFS= read -r candidate; do
   count=$(awk -F= '$1 == "HEADPLANE_HS_API_KEY" { count += 1 } END { print count + 0 }' "$candidate") || fail
   test "$count" = 1 || continue
   matches+=("$candidate")
-done < <(find -P "$root" -maxdepth 2 -name .env -print 2>/dev/null)
+done < <(find -P "$root" -maxdepth 3 -name .env -print 2>/dev/null)
 
 test "${#matches[@]}" = 1 || fail
 key=$(awk -F= '$1 == "HEADPLANE_HS_API_KEY" { sub(/^[^=]*=/, ""); print; exit }' "${matches[0]}") || fail

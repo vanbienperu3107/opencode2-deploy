@@ -448,6 +448,7 @@ class DeployWorkflowSecurityTests(unittest.TestCase):
         self.assertIn("required: true", workflow[workflow.index("headscale_user_id:"):workflow.index("concurrency:")])
         self.assertIn("HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}", workflow)
         self.assertIn("read-headplane-api-key.sh", workflow)
+        self.assertIn("-maxdepth 3", (REPOSITORY / "scripts" / "read-headplane-api-key.sh").read_text(encoding="utf-8"))
         self.assertNotIn("secrets.HEADPLANE_HS_API_KEY", workflow)
         self.assertIn("^[0-9]+$", workflow)
         self.assertNotIn('print(u[0]["id"] if u else "")', workflow)
