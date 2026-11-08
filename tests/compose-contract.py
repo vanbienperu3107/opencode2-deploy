@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -61,7 +62,7 @@ def validate(compose: dict[str, object]) -> None:
 
     if sidecar.get("image") != "tailscale/tailscale:v1.104.4":
         fail("sidecar image must be pinned")
-    if app.get("image") != "ghcr.io/anomalyco/opencode:2.0.32":
+    if not re.fullmatch(r"ghcr\.io/anomalyco/opencode:[0-9]+\.[0-9]+\.[0-9]+", str(app.get("image", ""))):
         fail("application image must be pinned")
     if app.get("network_mode") not in ("service:ts-opencode2", "service:opencode2-ts-opencode2"):
         fail("application must share only the sidecar network namespace")

@@ -11,9 +11,17 @@ runtime secrets or SSH private material.
 - Access to the GitHub repository's secret store for runtime values.
 - Operator-approved infrastructure changes before any runtime deployment.
 
-The runtime uses exactly `ghcr.io/anomalyco/opencode:2.0.32` and the Tailnet
-sidecar uses exactly `tailscale/tailscale:v1.104.4`; never replace either pin
-with `latest`.
+The runtime pins an exact `ghcr.io/anomalyco/opencode:<x.y.z>` version and the
+Tailnet sidecar uses exactly `tailscale/tailscale:v1.104.4`; never replace either
+pin with `latest`.
+
+The `Auto-update OpenCode (vpn4)` workflow runs every six hours (and on manual
+dispatch). When a newer stable release of the pinned major version is published
+with a GHCR image, it bumps the pin on an `auto/opencode-<version>` branch, runs
+the CI contracts, deploys that exact commit to vpn4 through `deploy.yml`, and
+fast-forwards `main` only after the deploy's health and 401/200 checks pass. A
+failed deploy is redeployed from the previous `main` commit and reported in an
+issue. Major-version upgrades stay manual.
 
 ## Runtime isolation
 

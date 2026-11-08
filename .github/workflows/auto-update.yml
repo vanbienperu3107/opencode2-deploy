@@ -1,0 +1,137 @@
+name: Auto-update OpenCode (vpn4)
+
+# Checks for a newer stable OpenCode release of the pinned major version,
+# validates the bumped pin, deploys it to vpn4 and only then moves main to it.
+# A failed deploy is rolled back to the previous main commit and reported in an
+# issue; main never points at a version that did not pass the deploy checks.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: opencode2-auto-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      update: ${{ steps.bump.outputs.update }}
+      version: ${{ steps.bump.outputs.version }}
+      previous: ${{ steps.bump.outputs.previous }}
+      candidate_sha: ${{ steps.push.outputs.candidate_sha }}
+      main_sha: ${{ steps.bump.outputs.main_sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Find newer stable release
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          main_sha=$(git rev-parse HEAD)
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+          previous=$(python3 scripts/opencode-version.py current)
+          gh api 'repos/anomalyco/opencode/releases?per_page=100' > /tmp/releases.json
+          version=$(python3 scripts/opencode-version.py latest /tmp/releases.json)
+          echo "pinned=$previous latest=$version"
+          newer=$(python3 -c 'import sys; a,b=(tuple(map(int,v.split("."))) for v in sys.argv[1:]); print("yes" if b>a else "no")' "$previous" "$version")
+          if [ "$newer" != yes ]; then echo "update=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          token=$(curl -sf "https://ghcr.io/token?scope=repository:anomalyco/opencode:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/anomalyco/opencode/manifests/$version")
+          if [ "$code" != 200 ]; then echo "image $version not published yet ($code)"; echo "update=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          python3 scripts/opencode-version.py set "$version"
+          echo "update=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Validate bumped configuration
+        if: steps.bump.outputs.update == 'true'
+        run: |
+          set -euo pipefail
+          docker compose --env-file tests/compose-ci.env config --format json >/dev/null
+          python3 -m unittest tests.test_contracts tests.test_compose_contract_devices tests.test_auto_update
+          bash tests/compose-contract.sh
+          bash tests/validate-config.sh
+          bash tests/ssh-policy-contract.sh
+          bash tests/deploy-workflow-contract.sh
+
+      - name: Push candidate branch
+        id: push
+        if: steps.bump.outputs.update == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          PREVIOUS: ${{ steps.bump.outputs.previous }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -am "chore: update OpenCode $PREVIOUS -> $VERSION"
+          git push -q origin "HEAD:refs/heads/auto/opencode-$VERSION"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.update == 'true'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      ref: ${{ needs.check.outputs.candidate_sha }}
+    secrets: inherit
+
+  promote:
+    needs: [check, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Fast-forward main to the deployed version
+        env:
+          CANDIDATE: ${{ needs.check.outputs.candidate_sha }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin "auto/opencode-$VERSION" main
+          test "$(git rev-parse "origin/auto/opencode-$VERSION")" = "$CANDIDATE"
+          git push origin "$CANDIDATE:refs/heads/main"
+          git push origin --delete "auto/opencode-$VERSION"
+
+  rollback:
+    needs: [check, deploy]
+    if: always() && needs.deploy.result == 'failure'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      ref: ${{ needs.check.outputs.main_sha }}
+    secrets: inherit
+
+  report:
+    needs: [check, deploy, rollback]
+    if: always() && needs.check.outputs.update == 'true' && needs.deploy.result != 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
+          ROLLBACK: ${{ needs.rollback.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Auto-update to OpenCode $VERSION failed" \
+            --body "Deploy of $VERSION failed; rollback to $PREVIOUS: $ROLLBACK. Run: $RUN_URL. Main was not moved. The candidate branch auto/opencode-$VERSION is kept for investigation."

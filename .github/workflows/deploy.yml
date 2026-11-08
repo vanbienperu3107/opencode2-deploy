@@ -8,6 +8,13 @@ on:
       ref:
         description: Exact commit SHA of this repository to deploy
         required: true
+  # Reused by auto-update.yml to deploy a candidate (or roll back) by SHA.
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit SHA of this repository to deploy
+        required: true
+        type: string
 
 concurrency:
   group: deploy-vpn4-host
