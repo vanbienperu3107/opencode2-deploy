@@ -103,7 +103,7 @@ jobs:
               if [ "$state" = healthy ]; then break; fi
               sleep 5
             done
-            [ "$state" = healthy ] || { $SUDO docker compose -p opencode2-deploy logs --tail 60; exit 1; }
+            [ "$state" = healthy ] || { $SUDO docker inspect -f '{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{end}}' opencode2-deploy-opencode2-1 | tail -n 5; $SUDO docker compose -p opencode2-deploy logs --tail 60 opencode2; exit 1; }
             $SUDO docker exec opencode2-deploy-ts-opencode2-1 tailscale status --self --peers=false
             echo "deployed $REF"
         env:

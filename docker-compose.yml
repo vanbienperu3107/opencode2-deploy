@@ -55,9 +55,9 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      # BusyBox wget (Alpine base) reads credentials from the URL; values stay
-      # in the container environment and are expanded only at check time.
-      test: ["CMD-SHELL", "wget -q -O /dev/null \"http://$$OPENCODE_SERVER_USERNAME:$$OPENCODE_SERVER_PASSWORD@127.0.0.1:4096/api/global/health\""]
+      # BusyBox wget does not send URL-embedded credentials, so build the Basic
+      # header from the container environment at check time.
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header \"Authorization: Basic $$(printf '%s:%s' \"$$OPENCODE_SERVER_USERNAME\" \"$$OPENCODE_SERVER_PASSWORD\" | base64 | tr -d '\\n')\" http://127.0.0.1:4096/api/global/health"]
       interval: 30s
       timeout: 5s
       retries: 5
