@@ -491,7 +491,7 @@ class RuntimeComposeContractTests(unittest.TestCase):
                     "configs": [{"source": "opencode-config", "target": "/etc/opencode/opencode.jsonc", "mode": 292}],
                     "cap_drop": ["ALL"],
                     "security_opt": ["no-new-privileges:true"],
-                    "healthcheck": {"test": ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4096/global/health"]},
+                    "healthcheck": {"test": ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4096/api/global/health"]},
                 },
             },
         }

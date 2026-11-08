@@ -33,6 +33,10 @@ grep -Fq "'^[A-Za-z0-9_-]+$'" "$workflow" || fail 'deploy must validate the pre-
 # appleboy/ssh-action script_stop checks every line's exit status, so a loop
 # guard written as `[ ... ] && break` aborts the deploy on its first false test.
 ! grep -Eq '\][[:space:]]*&&[[:space:]]*(break|continue)' "$workflow" || fail 'deploy loops must use if/then guards because script_stop aborts on a false && test'
+# OpenCode 2.x serves the static web UI on every non-/api path, so health and
+# auth checks must target the API prefix to prove anything.
+grep -Fq 'url=https://opencode2.hangocthanh.io.vn/api/global/health' "$workflow" || fail 'public auth check must target the /api health endpoint'
+grep -Fq 'application/json' "$workflow" || fail 'public auth check must require a JSON API response, not the web UI shell'
 preflight_line=$(grep -n -- '- name: Check required secrets' "$workflow" | cut -d: -f1)
 transport_line=$(grep -n -- '- name: Preflight vpn4 SSH transport' "$workflow" | cut -d: -f1)
 deploy_line=$(grep -n -- '- name: Deploy stack to vpn4' "$workflow" | cut -d: -f1)

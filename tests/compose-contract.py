@@ -113,7 +113,7 @@ def validate(compose: dict[str, object]) -> None:
         fail("application hardening controls are incomplete")
     healthcheck = app.get("healthcheck")
     healthcheck_test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
-    if not isinstance(healthcheck_test, list) or not all(isinstance(part, str) for part in healthcheck_test) or "/global/health" not in " ".join(healthcheck_test):
+    if not isinstance(healthcheck_test, list) or not all(isinstance(part, str) for part in healthcheck_test) or "/api/global/health" not in " ".join(healthcheck_test):
         fail("application healthcheck is missing")
 
     app_environment = environment(app, "application")
