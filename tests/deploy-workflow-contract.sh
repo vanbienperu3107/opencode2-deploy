@@ -35,8 +35,9 @@ grep -Fq "'^[A-Za-z0-9_-]+$'" "$workflow" || fail 'deploy must validate the pre-
 ! grep -Eq '\][[:space:]]*&&[[:space:]]*(break|continue)' "$workflow" || fail 'deploy loops must use if/then guards because script_stop aborts on a false && test'
 # OpenCode 2.x serves the static web UI on every non-/api path, so health and
 # auth checks must target the API prefix to prove anything.
-grep -Fq 'url=https://opencode2.hangocthanh.io.vn/api/global/health' "$workflow" || fail 'public auth check must target the /api health endpoint'
+grep -Fq 'url=https://opencode2.hangocthanh.io.vn/api/info' "$workflow" || fail 'public auth check must target the /api health endpoint'
 grep -Fq 'application/json' "$workflow" || fail 'public auth check must require a JSON API response, not the web UI shell'
+! grep -Fq 'global/health' "$workflow" || fail 'OpenCode 2 has no /api/global/health route; use /api/info'
 grep -Fq '.State.Health.Log' "$workflow" || fail 'deploy must print container health probe output when it never becomes healthy'
 preflight_line=$(grep -n -- '- name: Check required secrets' "$workflow" | cut -d: -f1)
 transport_line=$(grep -n -- '- name: Preflight vpn4 SSH transport' "$workflow" | cut -d: -f1)
