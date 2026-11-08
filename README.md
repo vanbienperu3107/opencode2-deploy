@@ -154,15 +154,14 @@ artifacts.
 
 ## Deployment and rollback boundary
 
-The manual `Deploy OpenCode v2 (vpn4)` workflow requires two non-secret inputs:
-`ref` (the exact 40-character commit SHA to deploy) and `headscale_user_id` (the
-numeric Headscale user ID that must own the one-hour pre-auth key). It rejects a
-non-numeric ID and queries Headscale to confirm that the requested ID exists
-before creating the key; it never chooses the first user returned by the API.
-The generated key remains non-reusable and non-ephemeral and expires after one
-hour.
+The manual `Deploy OpenCode v2 (vpn4)` workflow requires one non-secret input:
+`ref` (the exact 40-character commit SHA to deploy). The Tailnet pre-auth key is
+read from the `TS_AUTHKEY` repository secret, created by the operator on the
+Headscale server (`headscale preauthkeys create --user <id> --expiration 1h`).
+The workflow validates its format and passes it only to the sidecar; once the
+`opencode2_tailscale_state` volume holds an identity, later deploys ignore it.
 
-Before requesting the pre-auth key, the workflow fail-closes on absent runtime
+Before contacting vpn4, the workflow fail-closes on absent runtime
 secrets, including `SSH_HOST_VPN4`, `SSH_USER`, `SSH_KEY`, and
 `SSH_HOST_VPN4_FINGERPRINT`. The latter is the reviewed SHA256 host-key
 fingerprint for vpn4 and is supplied to the pinned

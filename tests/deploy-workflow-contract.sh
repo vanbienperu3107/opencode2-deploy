@@ -19,18 +19,17 @@ test -f "$renderer" || fail 'missing runtime env renderer'
 grep -Fq 'workflow_dispatch:' "$workflow" || fail 'deploy must be manually dispatched'
 grep -Fq 'permissions:' "$workflow" || fail 'deploy must declare token permissions'
 grep -Fq 'contents: read' "$workflow" || fail 'deploy token must stay read-only'
-for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_KEY SSH_HOST_VPN4 SSH_USER; do
+for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_KEY SSH_HOST_VPN4 SSH_USER TS_AUTHKEY; do
   grep -Fq "secrets.$secret" "$workflow" || fail "deploy does not consume $secret"
 done
 grep -Eq 'appleboy/ssh-action@[0-9a-f]{40}[[:space:]]+# v1\.2\.0' "$workflow" || fail 'deploy must pin appleboy ssh-action to the reviewed v1.2.0 commit'
 ! grep -Fq 'fingerprint:' "$workflow" || fail 'deploy transport must not use a host fingerprint after user-approved bypass'
-grep -Fq 'headscale_user_id:' "$workflow" || fail 'deploy must require a Headscale user ID input'
-grep -Fq 'HEADSCALE_USER_ID: ${{ inputs.headscale_user_id }}' "$workflow" || fail 'deploy must bind the requested Headscale user ID'
-grep -Fq 'read-headplane-api-key.sh' "$workflow" || fail 'deploy must use the guarded Headscale credential reader on vpn4'
-! grep -Fq 'secrets.HEADPLANE_HS_API_KEY' "$workflow" || fail 'deploy must not transfer the old Headscale key through GitHub secrets'
-grep -Fq "'^[0-9]+$'" "$workflow" || fail 'deploy must validate the Headscale user ID as numeric'
-grep -Fq 'requested Headscale user was not found' "$workflow" || fail 'deploy must verify the requested Headscale user exists'
-grep -Fq '\"user\":\"$HEADSCALE_USER_ID\"' "$workflow" || fail 'deploy must create the pre-auth key for the requested Headscale user'
+grep -Fq 'TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}' "$workflow" || fail 'deploy must take the Tailnet pre-auth key from the TS_AUTHKEY secret'
+! grep -Fq 'read-headplane-api-key.sh' "$workflow" || fail 'deploy must not depend on a Headscale API key on vpn4'
+! grep -Fq '/api/v1/preauthkey' "$workflow" || fail 'deploy must not mint pre-auth keys through the Headscale API'
+! grep -Fq 'secrets.HEADPLANE_HS_API_KEY' "$workflow" || fail 'deploy must not transfer a Headscale API key'
+! grep -Fq 'headscale_user_id' "$workflow" || fail 'deploy must not require an unused Headscale user input'
+grep -Fq "'^[A-Za-z0-9_-]+$'" "$workflow" || fail 'deploy must validate the pre-auth key shape before sending it'
 preflight_line=$(grep -n -- '- name: Check required secrets' "$workflow" | cut -d: -f1)
 transport_line=$(grep -n -- '- name: Preflight vpn4 SSH transport' "$workflow" | cut -d: -f1)
 deploy_line=$(grep -n -- '- name: Deploy stack to vpn4' "$workflow" | cut -d: -f1)

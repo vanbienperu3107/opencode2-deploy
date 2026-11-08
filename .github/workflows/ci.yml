@@ -23,4 +23,3 @@ jobs:
           bash tests/validate-config.sh
           bash tests/ssh-policy-contract.sh
           bash tests/deploy-workflow-contract.sh
-          bash tests/headplane-runtime-credential-contract.sh
