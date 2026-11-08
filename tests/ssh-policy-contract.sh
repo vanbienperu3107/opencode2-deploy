@@ -81,6 +81,11 @@ assert_fails bash "$known_hosts_script" --inventory "$test_root/root-inventory" 
 assert_fails bash "$known_hosts_script" --ssh-option 'StrictHostKeyChecking=no'
 assert_fails bash "$known_hosts_script" --inventory "$test_root/inventory" --output "$test_root/accept-new_known_hosts" --ssh-option 'StrictHostKeyChecking=accept-new'
 
+# The production Headscale MagicDNS base domain is tail.hangocthanh.io.vn.
+printf 'vpn2.tail.hangocthanh.io.vn %s %s %s\n' "$fingerprint" "$key_type" "$key_blob" >"$test_root/magicdns-inventory"
+bash "$known_hosts_script" --inventory "$test_root/magicdns-inventory" --output "$test_root/magicdns-known_hosts" >/dev/null || fail 'MagicDNS hostname under tail.hangocthanh.io.vn was rejected'
+ssh-keygen -F 'vpn2.tail.hangocthanh.io.vn' -f "$test_root/magicdns-known_hosts" >/dev/null || fail 'MagicDNS host key was not written'
+
 for unsafe_hostname in \
   '*.tailnet.ts.net' \
   '!node-a.tailnet.ts.net' \
@@ -91,7 +96,12 @@ for unsafe_hostname in \
   '2001:db8::42' \
   '[node-a.tailnet.ts.net]:22' \
   'node-a.tailnet.ts.net:22' \
-  'node-a.tailnet.ts.net,alias.tailnet.ts.net'; do
+  'node-a.tailnet.ts.net,alias.tailnet.ts.net' \
+  'hangocthanh.io.vn' \
+  'opencode2.hangocthanh.io.vn' \
+  'tail.hangocthanh.io.vn' \
+  'evil.tail.hangocthanh.io.vn.attacker.com' \
+  'eviltail.hangocthanh.io.vn'; do
   assert_invalid_hostname "$unsafe_hostname"
 done
 

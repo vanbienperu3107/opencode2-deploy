@@ -82,5 +82,29 @@ class AutoUpdateWorkflowTests(unittest.TestCase):
         self.assertNotIn(":latest", workflow)
 
 
+VERIFY = REPOSITORY / ".github" / "workflows" / "verify.yml"
+
+
+class VerifyWorkflowTests(unittest.TestCase):
+    def test_verify_is_manual_and_reverts_its_side_effects(self) -> None:
+        workflow = VERIFY.read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("schedule:", workflow)
+        self.assertNotIn("down -v", workflow)
+        self.assertNotIn("volume rm", workflow)
+        self.assertIn("unbanip", workflow)
+        self.assertIn("-X DELETE", workflow)
+        self.assertIn("if: always()", workflow[workflow.index("  cleanup:"):])
+        self.assertIn("StrictHostKeyChecking=yes", workflow)
+        self.assertNotIn("StrictHostKeyChecking=no", workflow)
+        self.assertIn("group: deploy-vpn4-host", workflow)
+
+    def test_verify_covers_every_acceptance_area(self) -> None:
+        workflow = VERIFY.read_text(encoding="utf-8")
+        for marker in ("/api/model/default", "/prompt", "PONG", "tailscale ping", "opencode_known_hosts",
+                       "docker restart", "fail2ban-client status opencode2-401", "Pixel 7", "width: 1440"):
+            self.assertIn(marker, workflow)
+
+
 if __name__ == "__main__":
     unittest.main()

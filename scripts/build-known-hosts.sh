@@ -25,7 +25,9 @@ fail() {
 
 is_literal_tailnet_hostname() {
   local hostname=$1
-  [[ $hostname =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.ts\.net$ ]]
+  # Accept Tailscale-hosted *.ts.net names and this Headscale deployment's
+  # MagicDNS base domain (tail.hangocthanh.io.vn); nothing else.
+  [[ $hostname =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.(ts\.net|tail\.hangocthanh\.io\.vn)$ ]]
 }
 
 reject_unsafe_arguments() {
