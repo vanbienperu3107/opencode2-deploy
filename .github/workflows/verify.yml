@@ -1,0 +1,240 @@
+name: Verify OpenCode v2 (vpn4)
+
+# Post-deploy acceptance checks against production. Does not redeploy or change
+# configuration. Side effects are limited and reverted: one verification
+# session (deleted at the end), one `opencode2` container restart to prove
+# persistence, and a temporary fail2ban ban of this runner's IP (unbanned).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vpn4-host
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BASE_URL: https://opencode2.hangocthanh.io.vn
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    outputs:
+      session_id: ${{ steps.prompt.outputs.session_id }}
+    steps:
+      - name: Auth boundary and configuration
+        env:
+          PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/api/info")
+          echo "unauthenticated /api/info -> $code"; [ "$code" = 401 ]
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -u "opencode:not-the-password" "$BASE_URL/api/info")
+          echo "wrong password /api/info -> $code"; [ "$code" = 401 ]
+          curl -sf --max-time 15 -u "opencode:$PW" "$BASE_URL/api/info" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("version=%s" % d["version"])'
+          curl -sf --max-time 15 -u "opencode:$PW" "$BASE_URL/api/model/default" > /tmp/default.json
+          python3 - <<'EOF'
+          import json
+          raw = json.load(open("/tmp/default.json"))
+          text = json.dumps(raw)
+          print("default model payload:", text[:300])
+          assert "cliproxy" in text and "deepseek-v4-flash" in text, "default model is not cliproxy/deepseek-v4-flash"
+          EOF
+
+      - name: CLIProxy completion through OpenCode
+        id: prompt
+        env:
+          PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          auth=(-u "opencode:$PW" -H 'Content-Type: application/json' --max-time 30)
+          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+          echo "session_id=$sid" >> "$GITHUB_OUTPUT"
+          echo "session $sid"
+          curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else."}' >/dev/null
+          curl -sf -u "opencode:$PW" --max-time 240 -X POST "$BASE_URL/api/experimental/session/$sid/wait" >/dev/null || true
+          for i in $(seq 1 24); do
+            curl -sf -u "opencode:$PW" --max-time 30 "$BASE_URL/api/session/$sid/message" > /tmp/messages.json
+            if grep -q 'PONG' /tmp/messages.json; then break; fi
+            sleep 5
+          done
+          python3 - <<'EOF'
+          import json
+          raw = open("/tmp/messages.json").read()
+          print("messages bytes:", len(raw))
+          assert "PONG" in raw.replace("Reply with exactly the single word PONG", ""), "assistant did not answer PONG via CLIProxy"
+          print("assistant answered PONG via cliproxy/deepseek-v4-flash")
+          EOF
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Playwright
+        run: |
+          npm init -y >/dev/null
+          npm install --silent playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Render web UI on desktop and mobile
+        env:
+          PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        run: |
+          cat > ui.mjs <<'EOF'
+          import { chromium, devices } from "playwright"
+          const base = process.env.BASE_URL
+          const browser = await chromium.launch()
+          const viewports = {
+            desktop: { viewport: { width: 1440, height: 900 } },
+            mobile: { ...devices["Pixel 7"] },
+          }
+          let failed = false
+          for (const [name, options] of Object.entries(viewports)) {
+            const context = await browser.newContext({
+              ...options,
+              httpCredentials: { username: "opencode", password: process.env.PW, send: "always" },
+            })
+            const page = await context.newPage()
+            const errors = []
+            page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()) })
+            page.on("pageerror", (e) => errors.push(String(e)))
+            const response = await page.goto(base + "/", { waitUntil: "networkidle", timeout: 60000 })
+            await page.waitForTimeout(3000)
+            await page.screenshot({ path: `ui-${name}.png`, fullPage: true })
+            const metrics = await page.evaluate(() => {
+              const overflowX = document.documentElement.scrollWidth > window.innerWidth + 1
+              const sizes = [...document.querySelectorAll("body *")]
+                .filter((el) => el.childElementCount === 0 && el.textContent.trim() && el.getBoundingClientRect().width > 0)
+                .map((el) => parseFloat(getComputedStyle(el).fontSize))
+              const body = document.body.innerText
+              return { overflowX, minFont: sizes.length ? Math.min(...sizes) : 0, textLength: body.length, signIn: /password|sign in|đăng nhập/i.test(body), sample: body.slice(0, 200) }
+            })
+            console.log(name, "status", response.status(), JSON.stringify(metrics))
+            console.log(name, "console errors", errors.length, errors.slice(0, 5))
+            if (response.status() !== 200) failed = true
+            if (metrics.textLength < 20) { console.log(name, "page rendered almost no text"); failed = true }
+            if (metrics.signIn) { console.log(name, "still on sign-in screen despite credentials"); failed = true }
+            if (metrics.overflowX) { console.log(name, "horizontal overflow"); failed = true }
+            if (metrics.minFont && metrics.minFont < 11) { console.log(name, "text smaller than 11px"); failed = true }
+            if (errors.length) failed = true
+            await context.close()
+          }
+          await browser.close()
+          process.exit(failed ? 1 : 0)
+          EOF
+          node ui.mjs
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-screenshots
+          path: ui-*.png
+          retention-days: 3
+
+  host:
+    needs: api
+    if: always() && needs.api.outputs.session_id != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tailnet, SSH identity, persistence and fail2ban on vpn4
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        env:
+          SESSION_ID: ${{ needs.api.outputs.session_id }}
+          PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST_VPN4 }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          envs: SESSION_ID,PW
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -E"; else SUDO=""; fi
+            APP=opencode2-deploy-opencode2-1
+            TS=opencode2-deploy-ts-opencode2-1
+
+            echo "== Tailnet"
+            $SUDO docker exec "$TS" tailscale status --self --peers=false
+            peer=$($SUDO docker exec "$TS" tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); ps=[p for p in (d.get("Peer") or {}).values() if p.get("Online")]; print(ps[0]["TailscaleIPs"][0] if ps else "")')
+            if [ -n "$peer" ]; then $SUDO docker exec "$TS" tailscale ping -c 3 "$peer" | tail -n 1; else echo "no online peer to ping"; exit 1; fi
+
+            echo "== SSH identity (dedicated key, strict host keys)"
+            $SUDO docker exec "$APP" sh -c 'test -s /run/secrets/opencode_ssh_key && test -s /run/secrets/opencode_known_hosts && echo "secrets mounted"; command -v ssh || echo "no ssh client in image"'
+            hosts=$($SUDO docker exec "$APP" sh -c "awk '{print \$1}' /run/secrets/opencode_known_hosts")
+            echo "pinned hosts: $(echo "$hosts" | wc -l)"
+            ssh_ok=0
+            for h in $hosts; do
+              if $SUDO docker exec "$APP" sh -c "command -v ssh >/dev/null && ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/secrets/opencode_known_hosts -i /run/secrets/opencode_ssh_key opencode@$h 'id -un'" 2>&1 | sed 's/^/  /'; then ssh_ok=1; fi
+            done
+            [ "$ssh_ok" = 1 ] && echo "SSH: PASS" || echo "SSH: FAIL (no pinned host accepted the dedicated identity)"
+
+            echo "== Persistence across restart"
+            $SUDO docker exec "$APP" sh -c 'echo persist-check > /workspace/projects/.ci-persist && test -d /root'
+            $SUDO docker restart "$APP" >/dev/null
+            for i in $(seq 1 30); do
+              state=$($SUDO docker inspect -f '{{.State.Health.Status}}' "$APP")
+              if [ "$state" = healthy ]; then break; fi
+              sleep 5
+            done
+            echo "health after restart: $state"; [ "$state" = healthy ]
+            $SUDO docker exec "$APP" sh -c 'grep -qx persist-check /workspace/projects/.ci-persist && rm -f /workspace/projects/.ci-persist && echo "workspace volume: PASS"'
+            code=$(curl -s -o /dev/null -w '%{http_code}' -u "opencode:$PW" "https://opencode2.hangocthanh.io.vn/api/session/$SESSION_ID")
+            echo "session survives restart -> $code"; [ "$code" = 200 ]
+
+            echo "== fail2ban"
+            $SUDO docker exec edge-fail2ban fail2ban-client status opencode2-401
+            $SUDO docker exec caddy-edge sh -c 'tail -n 200 /var/log/caddy/opencode2-access.log' | grep -c '"status":401' | sed 's/^/401 lines in recent log: /'
+
+            [ "$ssh_ok" = 1 ]
+
+  fail2ban-ban:
+    needs: host
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      runner_ip: ${{ steps.ip.outputs.ip }}
+    steps:
+      - id: ip
+        run: echo "ip=$(curl -sf --max-time 10 https://api.ipify.org)" >> "$GITHUB_OUTPUT"
+      - name: Trigger the opencode2-401 jail from this runner
+        run: |
+          for i in $(seq 1 8); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u "opencode:wrong-$i" "$BASE_URL/api/info" || true)
+            echo "attempt $i -> ${code:-000}"
+            sleep 1
+          done
+          sleep 15
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE_URL/api/info" || true)
+          echo "after repeated 401s -> ${code:-000} (000 means banned)"
+          [ "${code:-000}" = 000 ]
+
+  cleanup:
+    needs: [api, host, fail2ban-ban]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Unban runner and delete verification session
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        env:
+          RUNNER_IP: ${{ needs.fail2ban-ban.outputs.runner_ip }}
+          SESSION_ID: ${{ needs.api.outputs.session_id }}
+          PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST_VPN4 }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          envs: RUNNER_IP,SESSION_ID,PW
+          script_stop: false
+          command_timeout: 3m
+          script: |
+            if [ "$(id -u)" -ne 0 ]; then SUDO="sudo -E"; else SUDO=""; fi
+            if printf '%s' "$RUNNER_IP" | grep -Eq '^[0-9.]+$'; then
+              $SUDO docker exec edge-fail2ban fail2ban-client set opencode2-401 unbanip "$RUNNER_IP" && echo "unbanned runner"
+            fi
+            if printf '%s' "$SESSION_ID" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' -u "opencode:$PW" -X DELETE "https://opencode2.hangocthanh.io.vn/api/session/$SESSION_ID")
+              echo "delete verification session -> $code"
+            fi
+            $SUDO docker exec edge-fail2ban fail2ban-client status opencode2-401 | grep -i 'banned'

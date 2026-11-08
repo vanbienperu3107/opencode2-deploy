@@ -119,6 +119,9 @@ out of band. Each non-comment line has the format:
 tailnet-hostname SHA256:fingerprint key-type base64-host-key
 ```
 
+Hostnames must be literal Tailnet names ending in `.ts.net` or this
+Headscale deployment's MagicDNS domain `.tail.hangocthanh.io.vn`.
+
 For example, after independently reviewing the hostname, public host key and
 SHA256 fingerprint through an approved operator channel:
 
