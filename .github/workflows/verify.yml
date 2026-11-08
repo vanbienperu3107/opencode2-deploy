@@ -191,6 +191,20 @@ jobs:
             $SUDO docker exec caddy-edge sh -c 'grep "\"status\":401" /var/log/caddy/opencode2-access.log | tail -n 1' \
               | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); r=d.get("request") or {}; print("log keys:", sorted(d)); print("request keys:", sorted(r)); print("ip fields:", {k: ("set" if r.get(k) else "empty") for k in ("remote_ip","client_ip","remote_port")})'
 
+            echo "== fail2ban diagnostics"
+            F2B="$SUDO docker exec edge-fail2ban"
+            for key in datepattern findtime maxretry logpath ignoreip; do
+              printf '%s: ' "$key"; $F2B fail2ban-client get opencode2-401 "$key" 2>&1 | tr '\n' ' ' | sed -E 's/([0-9]+\.){3}[0-9]+/<ip>/g'; echo
+            done
+            $F2B fail2ban-client status opencode-401 2>&1 | grep -E 'Total (failed|banned)' | sed 's/^/v1 jail /'
+            $F2B sh -c 'date -u +now=%s; stat -c "log mtime=%Y size=%s" /remotelogs/opencode2-access.log'
+            $SUDO docker exec caddy-edge sh -c 'grep "\"status\":401" /var/log/caddy/opencode2-access.log | tail -n 1' \
+              | python3 -c 'import json,sys; print("last 401 ts:", json.loads(sys.stdin.read() or "{}").get("ts"))'
+            $F2B sh -c 'fail2ban-regex /remotelogs/opencode2-access.log /config/fail2ban/filter.d/opencode2-401.conf' \
+              | sed -n '/Date template hits/,/^Lines:/p' | sed -E 's/([0-9]+\.){3}[0-9]+/<ip>/g'
+            $F2B sh -c 'ls /config/log/fail2ban/ 2>/dev/null; tail -n 300 /config/log/fail2ban/fail2ban.log 2>/dev/null' \
+              | grep -i -E 'opencode2|error|warn|ignor' | tail -n 25 | sed -E 's/([0-9]+\.){3}[0-9]+/<ip>/g'
+
             [ "$ssh_ok" = 1 ]
 
   fail2ban-ban:
