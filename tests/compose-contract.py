@@ -95,6 +95,9 @@ def validate(compose: dict[str, object]) -> None:
     networks = sidecar.get("networks")
     if not isinstance(networks, dict) or "edge" not in networks:
         fail("sidecar must join the edge network")
+    edge = networks.get("edge") or {}
+    if not isinstance(edge, dict) or "opencode2" not in (edge.get("aliases") or []):
+        fail("sidecar must expose the opencode2 alias on edge for the Caddy upstream")
 
     configs = app.get("configs")
     if not isinstance(configs, list) or not any(

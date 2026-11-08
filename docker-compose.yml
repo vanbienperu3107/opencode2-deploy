@@ -16,7 +16,11 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - edge
+      edge:
+        # Caddy on the edge network proxies to opencode2:4096; the app shares
+        # this sidecar's network namespace, so the alias must live here.
+        aliases:
+          - opencode2
 
   opencode2:
     image: ghcr.io/anomalyco/opencode:2.0.32
