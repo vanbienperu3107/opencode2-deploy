@@ -40,4 +40,9 @@ mkdir -p "$test_root/symlink-root"
 ln -s "$test_root/symlink-target/.env" "$test_root/symlink-root/.env"
 assert_fails_without_leak "$secret" env HEADSCALE_ENV_ROOT="$test_root/symlink-root" bash "$reader"
 
+mkdir -p "$test_root/mixed/regular" "$test_root/mixed/alias"
+printf 'HEADPLANE_HS_API_KEY=%s\n' "$secret" >"$test_root/mixed/regular/.env"
+ln -s "$test_root/symlink-target/.env" "$test_root/mixed/alias/.env"
+assert_fails_without_leak "$secret" env HEADSCALE_ENV_ROOT="$test_root/mixed" bash "$reader"
+
 printf 'PASS: Headscale runtime credential discovery contract\n'
