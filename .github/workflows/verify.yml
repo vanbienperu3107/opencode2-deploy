@@ -68,7 +68,8 @@ jobs:
           EOF
 
   browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.56 cannot install browser dependencies on ubuntu-26.04.
+    runs-on: ubuntu-24.04
     steps:
       - name: Install Playwright
         run: |
@@ -162,7 +163,7 @@ jobs:
             echo "== SSH identity (dedicated key, strict host keys)"
             $SUDO docker exec "$APP" sh -c 'test -s /run/secrets/opencode_ssh_key && test -s /run/secrets/opencode_known_hosts && echo "secrets mounted"; command -v ssh || echo "no ssh client in image"'
             hosts=$($SUDO docker exec "$APP" sh -c "awk '{print \$1}' /run/secrets/opencode_known_hosts")
-            echo "pinned hosts: $(echo "$hosts" | wc -l)"
+            echo "pinned hosts: $(echo "$hosts" | wc -l) ($(echo "$hosts" | sed -E 's/^[^.]+/<host>/' | sort -u | tr '\n' ' '))"
             ssh_ok=0
             for h in $hosts; do
               if $SUDO docker exec "$APP" sh -c "command -v ssh >/dev/null && ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/secrets/opencode_known_hosts -i /run/secrets/opencode_ssh_key opencode@$h 'id -un'" 2>&1 | sed 's/^/  /'; then ssh_ok=1; fi
@@ -184,7 +185,11 @@ jobs:
 
             echo "== fail2ban"
             $SUDO docker exec edge-fail2ban fail2ban-client status opencode2-401
+            $SUDO docker exec edge-fail2ban sh -c 'fail2ban-regex /remotelogs/opencode2-access.log /config/fail2ban/filter.d/opencode2-401.conf' | grep -E 'Failregex|Date template hits|Lines:|matched' | head -n 12 || true
             $SUDO docker exec caddy-edge sh -c 'tail -n 200 /var/log/caddy/opencode2-access.log' | grep -c '"status":401' | sed 's/^/401 lines in recent log: /'
+            # Show which client-IP keys the access log really carries (values masked).
+            $SUDO docker exec caddy-edge sh -c 'grep "\"status\":401" /var/log/caddy/opencode2-access.log | tail -n 1' \
+              | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); r=d.get("request") or {}; print("log keys:", sorted(d)); print("request keys:", sorted(r)); print("ip fields:", {k: ("set" if r.get(k) else "empty") for k in ("remote_ip","client_ip","remote_port")})'
 
             [ "$ssh_ok" = 1 ]
 
