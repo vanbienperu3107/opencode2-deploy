@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           auth=(-u "opencode:$PW" -H 'Content-Type: application/json' --max-time 30)
-          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify","location":{"directory":"/workspace/projects"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
           echo "session_id=$sid" >> "$GITHUB_OUTPUT"
           echo "session $sid"
           curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else."}' >/dev/null
