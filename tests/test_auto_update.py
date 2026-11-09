@@ -113,6 +113,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("CLIProxy did not complete an assistant message", workflow)
         self.assertIn("assistant message summary", workflow)
         self.assertIn("provider error kinds", workflow)
+        self.assertIn("runtime CLIProxy models ->", workflow)
         self.assertIn("/api/experimental/session/$sid/wait", workflow)
         self.assertIn('"location":{"directory":"/workspace/projects"}', workflow)
         self.assertIn('"agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}', workflow)
