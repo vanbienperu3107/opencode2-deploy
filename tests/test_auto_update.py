@@ -122,6 +122,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn('"delivery":"steer"', workflow)
         self.assertIn("claude-opus-5", workflow)
         self.assertIn("reported default model:", workflow)
+        self.assertIn("location[directory]=/workspace/projects", workflow)
         self.assertNotIn('print("default model payload:"', workflow)
         self.assertNotIn("edge-nginx", workflow)
 

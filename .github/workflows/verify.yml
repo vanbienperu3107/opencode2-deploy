@@ -33,7 +33,7 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -u "opencode:not-the-password" "$BASE_URL/api/info")
           echo "wrong password /api/info -> $code"; [ "$code" = 401 ]
           curl -sf --max-time 15 -u "opencode:$PW" "$BASE_URL/api/info" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("version=%s" % d["version"])'
-          curl -sf --max-time 15 -u "opencode:$PW" "$BASE_URL/api/model/default" > /tmp/default.json
+          curl -sf --max-time 15 -u "opencode:$PW" --get --data-urlencode 'location[directory]=/workspace/projects' "$BASE_URL/api/model/default" > /tmp/default.json
           python3 - <<'EOF'
           import json
           raw = json.load(open("/tmp/default.json"))
