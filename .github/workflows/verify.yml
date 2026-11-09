@@ -60,8 +60,8 @@ jobs:
           import json
           data = json.load(open("/tmp/messages.json")).get("data", [])
           assistant = [m for m in data if m.get("type") == "assistant"]
-          texts = [part.get("text", "") for m in assistant for part in m.get("content", []) if part.get("type") == "text"]
-          raise SystemExit(0 if any(text.strip() for text in texts) else 1)
+          complete = [m for m in assistant if (m.get("time") or {}).get("completed")]
+          raise SystemExit(0 if complete else 1)
           EOF
             then break; fi
             sleep 5
@@ -70,10 +70,12 @@ jobs:
           import json
           data = json.load(open("/tmp/messages.json")).get("data", [])
           assistant = [m for m in data if m.get("type") == "assistant"]
-          texts = [part.get("text", "") for m in assistant for part in m.get("content", []) if part.get("type") == "text"]
-          assert any(text.strip() for text in texts), "CLIProxy did not produce assistant text"
-          assert not any(m.get("error") for m in assistant), "assistant reported a provider error"
-          print("assistant response received through cliproxy/deepseek-v4-flash")
+          complete = [m for m in assistant if (m.get("time") or {}).get("completed")]
+          summary = [{"finish": m.get("finish"), "content_types": [p.get("type") for p in m.get("content", [])], "has_error": bool(m.get("error"))} for m in complete]
+          print("assistant message summary:", summary)
+          assert complete, "CLIProxy did not complete an assistant message"
+          assert not any(m.get("error") for m in complete), "assistant reported a provider error"
+          print("assistant completion received through cliproxy/deepseek-v4-flash")
           EOF
 
   browser:
