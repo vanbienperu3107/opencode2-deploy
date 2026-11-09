@@ -98,6 +98,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertNotIn("StrictHostKeyChecking", workflow)
         self.assertNotIn("opencode_ssh_key", workflow)
         self.assertNotIn("opencode_known_hosts", workflow)
+        self.assertIn("needs: [api, browser]", workflow)
         self.assertIn("group: deploy-vpn4-host", workflow)
 
     def test_verify_covers_every_acceptance_area(self) -> None:
@@ -105,6 +106,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         for marker in ("/api/model/default", "/prompt", "PONG", "tailscale ping",
                        "docker restart", "fail2ban-client status opencode2-401", "Pixel 7", "width: 1440"):
             self.assertIn(marker, workflow)
+        self.assertIn('page.locator("#server-connect-url")', workflow)
 
 
 if __name__ == "__main__":

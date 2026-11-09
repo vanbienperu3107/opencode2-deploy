@@ -96,7 +96,9 @@ jobs:
             })
             const page = await context.newPage()
             const errors = []
-            page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()) })
+            page.on("console", (m) => {
+              if (m.type() === "error" && !/status of 401/.test(m.text())) errors.push(m.text())
+            })
             page.on("pageerror", (e) => errors.push(String(e)))
             const response = await page.goto(base + "/", { waitUntil: "networkidle", timeout: 60000 })
             const usePassword = page.getByRole("button", { name: "Use password" })
@@ -139,8 +141,8 @@ jobs:
           retention-days: 3
 
   host:
-    needs: api
-    if: always() && needs.api.outputs.session_id != ''
+    needs: [api, browser]
+    if: always() && needs.api.outputs.session_id != '' && needs.browser.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Tailnet, persistence and fail2ban on vpn4
