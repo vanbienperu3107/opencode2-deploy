@@ -49,10 +49,10 @@ jobs:
         run: |
           set -euo pipefail
           auth=(-u "opencode:$PW" -H 'Content-Type: application/json' --max-time 30)
-          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify","location":{"directory":"/workspace/projects"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify","location":{"directory":"/workspace/projects"},"agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
           echo "session_id=$sid" >> "$GITHUB_OUTPUT"
           echo "session $sid"
-          curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else."}' >/dev/null
+          curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else.","delivery":"steer","metadata":{"displayText":"Reply with exactly the single word PONG and nothing else.","agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}}}' >/dev/null
           curl -sf -u "opencode:$PW" --max-time 240 -X POST "$BASE_URL/api/experimental/session/$sid/wait" >/dev/null || true
           for i in $(seq 1 24); do
             curl -sf -u "opencode:$PW" --max-time 30 "$BASE_URL/api/session/$sid/message" > /tmp/messages.json
