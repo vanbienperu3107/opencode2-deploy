@@ -114,6 +114,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("assistant message summary", workflow)
         self.assertIn("provider error kinds", workflow)
         self.assertIn("/api/experimental/session/$sid/wait", workflow)
+        self.assertIn('"location":{"directory":"/workspace/projects"}', workflow)
         self.assertNotIn('print("default model payload:"', workflow)
         self.assertNotIn("edge-nginx", workflow)
 
