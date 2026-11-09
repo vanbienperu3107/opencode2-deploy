@@ -37,8 +37,9 @@ jobs:
           python3 - <<'EOF'
           import json
           raw = json.load(open("/tmp/default.json"))
-          text = json.dumps(raw)
-          assert "cliproxy" in text and "claude-opus-5" in text, "default model is not cliproxy/claude-opus-5"
+          model = raw.get("data") or {}
+          print("reported default model:", {key: model.get(key) for key in ("providerID", "id", "modelID")})
+          assert model.get("providerID") == "cliproxy" and model.get("id") == "claude-opus-5", "default model is not cliproxy/claude-opus-5"
           print("default model is cliproxy/claude-opus-5")
           EOF
 
