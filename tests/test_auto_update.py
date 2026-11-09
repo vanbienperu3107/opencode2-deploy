@@ -95,13 +95,14 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("unbanip", workflow)
         self.assertIn("-X DELETE", workflow)
         self.assertIn("if: always()", workflow[workflow.index("  cleanup:"):])
-        self.assertIn("StrictHostKeyChecking=yes", workflow)
-        self.assertNotIn("StrictHostKeyChecking=no", workflow)
+        self.assertNotIn("StrictHostKeyChecking", workflow)
+        self.assertNotIn("opencode_ssh_key", workflow)
+        self.assertNotIn("opencode_known_hosts", workflow)
         self.assertIn("group: deploy-vpn4-host", workflow)
 
     def test_verify_covers_every_acceptance_area(self) -> None:
         workflow = VERIFY.read_text(encoding="utf-8")
-        for marker in ("/api/model/default", "/prompt", "PONG", "tailscale ping", "opencode_known_hosts",
+        for marker in ("/api/model/default", "/prompt", "PONG", "tailscale ping",
                        "docker restart", "fail2ban-client status opencode2-401", "Pixel 7", "width: 1440"):
             self.assertIn(marker, workflow)
 

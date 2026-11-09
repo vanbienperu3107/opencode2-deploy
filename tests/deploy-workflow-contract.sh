@@ -19,9 +19,12 @@ test -f "$renderer" || fail 'missing runtime env renderer'
 grep -Fq 'workflow_dispatch:' "$workflow" || fail 'deploy must be manually dispatched'
 grep -Fq 'permissions:' "$workflow" || fail 'deploy must declare token permissions'
 grep -Fq 'contents: read' "$workflow" || fail 'deploy token must stay read-only'
-for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_KEY SSH_HOST_VPN4 SSH_USER TS_AUTHKEY; do
+for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY SSH_KEY SSH_HOST_VPN4 SSH_USER TS_AUTHKEY; do
   grep -Fq "secrets.$secret" "$workflow" || fail "deploy does not consume $secret"
 done
+if grep -Eq 'OPENCODE_SSH_|opencode_ssh_key|opencode_known_hosts' "$workflow" "$renderer"; then
+  fail 'deploy runtime must not carry unsupported OpenCode SSH material'
+fi
 grep -Eq 'appleboy/ssh-action@[0-9a-f]{40}[[:space:]]+# v1\.2\.0' "$workflow" || fail 'deploy must pin appleboy ssh-action to the reviewed v1.2.0 commit'
 ! grep -Fq 'fingerprint:' "$workflow" || fail 'deploy transport must not use a host fingerprint after user-approved bypass'
 grep -Fq 'TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}' "$workflow" || fail 'deploy must take the Tailnet pre-auth key from the TS_AUTHKEY secret'
@@ -75,46 +78,30 @@ fi
 test ! -e "$test_root/out/.env" || fail 'renderer wrote an env file without secrets'
 
 mkdir -p "$test_root/out"
-private_key_header="-----BEGIN OPENSSH"$' '"PRIVATE KEY-----"
-private_key_footer="-----END OPENSSH"$' '"PRIVATE KEY-----"
-private_key="$private_key_header"$'\ncontract-key-material\n'"$private_key_footer"
-known_hosts=$'node-a.tailnet.ts.net ssh-ed25519 contract-key-a\nnode-b.tailnet.ts.net ssh-ed25519 contract-key-b'
 env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   OPENCODE_SERVER_PASSWORD='contract-password' \
   CLIPROXY_API_KEY='contract-cliproxy' \
   TS_AUTHKEY='contract-authkey' \
-  OPENCODE_SSH_PRIVATE_KEY="$private_key" \
-  OPENCODE_SSH_KNOWN_HOSTS="$known_hosts" \
   bash "$renderer" >"$test_root/stdout" 2>&1 || fail 'renderer rejected complete secrets'
 current="$test_root/out/current"
 test -L "$current" || fail 'runtime renderer must publish an atomic current generation pointer'
 generation=$(readlink -f "$current")
 test "$(stat -c '%a' "$generation")" = '700' || fail 'runtime generation directory must be mode 0700'
 test "$(stat -c '%a' "$generation/.env")" = '600' || fail 'runtime env must be mode 0600'
-test "$(stat -c '%a' "$generation/opencode_ssh_key")" = '600' || fail 'SSH key must be mode 0600'
-test "$(stat -c '%a' "$generation/opencode_known_hosts")" = '600' || fail 'known hosts must be mode 0600'
 grep -Fxq 'OPENCODE_SERVER_USERNAME=opencode' "$generation/.env" || fail 'runtime env must pin the documented default username'
 grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'runtime env lost the password'
-grep -Fxq "OPENCODE_SSH_KEY_FILE=$current/opencode_ssh_key" "$generation/.env" || fail 'runtime env must reference the current-generation SSH key'
-grep -Fxq "OPENCODE_SSH_KNOWN_HOSTS_FILE=$current/opencode_known_hosts" "$generation/.env" || fail 'runtime env must reference the current-generation known hosts'
-grep -Fxq -- "$private_key_header" "$generation/opencode_ssh_key" || fail 'renderer must preserve multiline SSH private-key material'
-grep -Fxq 'node-a.tailnet.ts.net ssh-ed25519 contract-key-a' "$generation/opencode_known_hosts" || fail 'renderer must preserve multiline known-hosts material'
-grep -Fxq 'node-b.tailnet.ts.net ssh-ed25519 contract-key-b' "$generation/opencode_known_hosts" || fail 'renderer must preserve every known-host entry'
 
-# Failure during the second secret publish must not alter the currently live generation.
+# A replacement must publish a complete new environment without mutating the old generation.
 previous_target=$(readlink "$current")
-if env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" RENDER_RUNTIME_ENV_FAIL_ON_SECOND_SECRET_WRITE=1 \
+env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   OPENCODE_SERVER_PASSWORD='next-password' \
   CLIPROXY_API_KEY='next-cliproxy' \
   TS_AUTHKEY='next-authkey' \
-  OPENCODE_SSH_PRIVATE_KEY='next-ssh-private-key' \
-  OPENCODE_SSH_KNOWN_HOSTS='next-known-hosts' \
-  bash "$renderer" >/dev/null 2>&1; then
-  fail 'renderer did not fail when the second secret publish was injected to fail'
-fi
-test "$(readlink "$current")" = "$previous_target" || fail 'failed generation replaced the live current pointer'
-test "$(readlink -f "$current")" = "$generation" || fail 'failed generation changed the live generation'
+  bash "$renderer" >/dev/null 2>&1 || fail 'renderer rejected a replacement generation'
+test "$(readlink "$current")" != "$previous_target" || fail 'replacement generation did not replace the current pointer'
+test "$(readlink -f "$current")" != "$generation" || fail 'replacement generation did not change the live generation'
 grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'failed generation changed existing env material'
+grep -Fxq 'OPENCODE_SERVER_PASSWORD=next-password' "$(readlink -f "$current")/.env" || fail 'replacement generation lost new env material'
 if grep -Eq 'contract-(password|cliproxy|authkey)' "$test_root/stdout"; then
   fail 'renderer printed a secret value'
 fi

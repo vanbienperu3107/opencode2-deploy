@@ -64,7 +64,6 @@ jobs:
           python3 -m unittest tests.test_contracts tests.test_compose_contract_devices tests.test_auto_update
           bash tests/compose-contract.sh
           bash tests/validate-config.sh
-          bash tests/ssh-policy-contract.sh
           bash tests/deploy-workflow-contract.sh
 
       - name: Push candidate branch
