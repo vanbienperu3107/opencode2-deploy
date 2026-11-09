@@ -18,7 +18,7 @@ env:
   BASE_URL: https://opencode2.hangocthanh.io.vn
 
 jobs:
-  api:
+  api-check:
     runs-on: ubuntu-latest
     outputs:
       session_id: ${{ steps.prompt.outputs.session_id }}
@@ -152,14 +152,14 @@ jobs:
           retention-days: 3
 
   host:
-    needs: [api, browser]
-    if: always() && needs.api.outputs.session_id != '' && needs.browser.result == 'success'
+    needs: [api-check, browser]
+    if: always() && needs.api-check.outputs.session_id != '' && needs.browser.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Tailnet, persistence and fail2ban on vpn4
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
-          SESSION_ID: ${{ needs.api.outputs.session_id }}
+          SESSION_ID: ${{ needs.api-check.outputs.session_id }}
           PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST_VPN4 }}
@@ -238,7 +238,7 @@ jobs:
           [ "${code:-000}" = 000 ]
 
   cleanup:
-    needs: [api, host, fail2ban-ban]
+    needs: [api-check, host, fail2ban-ban]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -246,7 +246,7 @@ jobs:
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
           RUNNER_IP: ${{ needs.fail2ban-ban.outputs.runner_ip }}
-          SESSION_ID: ${{ needs.api.outputs.session_id }}
+          SESSION_ID: ${{ needs.api-check.outputs.session_id }}
           PW: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST_VPN4 }}
