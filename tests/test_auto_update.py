@@ -88,6 +88,8 @@ VERIFY = REPOSITORY / ".github" / "workflows" / "verify.yml"
 class VerifyWorkflowTests(unittest.TestCase):
     def test_verify_is_manual_and_reverts_its_side_effects(self) -> None:
         workflow = VERIFY.read_text(encoding="utf-8")
+        self.assertIn("  api-check:", workflow)
+        self.assertNotIn("\n  api:\n", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("schedule:", workflow)
         self.assertNotIn("down -v", workflow)
@@ -98,7 +100,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertNotIn("StrictHostKeyChecking", workflow)
         self.assertNotIn("opencode_ssh_key", workflow)
         self.assertNotIn("opencode_known_hosts", workflow)
-        self.assertIn("needs: [api, browser]", workflow)
+        self.assertIn("needs: [api-check, browser]", workflow)
         self.assertIn("group: deploy-vpn4-host", workflow)
 
     def test_verify_covers_every_acceptance_area(self) -> None:
