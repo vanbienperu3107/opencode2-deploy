@@ -181,6 +181,11 @@ jobs:
             peer=$($SUDO docker exec "$TS" tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); ps=[p for p in (d.get("Peer") or {}).values() if p.get("Online")]; print(ps[0]["TailscaleIPs"][0] if ps else "")')
             if [ -n "$peer" ]; then $SUDO docker exec "$TS" tailscale ping -c 3 "$peer" | tail -n 1; else echo "no online peer to ping"; exit 1; fi
 
+            echo "== Runtime CLIProxy credential"
+            code=$($SUDO docker exec "$APP" sh -c 'wget -q -S -O /dev/null --header "Authorization: Bearer $CLIPROXY_API_KEY" https://cliproxy.hangocthanh.io.vn/v1/models 2>&1 | awk "/HTTP\// {code=\$2} END {print code}"')
+            echo "runtime CLIProxy models -> ${code:-000}"
+            [ "$code" = 200 ] || { echo "::error::runtime CLIPROXY_API_KEY was rejected"; exit 1; }
+
             echo "== Persistence across restart"
             $SUDO docker exec "$APP" sh -c 'echo persist-check > /workspace/projects/.ci-persist && test -d /root'
             $SUDO docker restart "$APP" >/dev/null
