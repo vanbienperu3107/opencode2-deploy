@@ -110,6 +110,7 @@ class VerifyWorkflowTests(unittest.TestCase):
                        "docker restart", "fail2ban-client status opencode2-401", "Pixel 7", "width: 1440"):
             self.assertIn(marker, workflow)
         self.assertIn('page.locator("#server-connect-url")', workflow)
+        self.assertIn('assert "cliproxy" in text and "claude-opus-5" in text', workflow)
         self.assertIn("CLIProxy did not complete an assistant message", workflow)
         self.assertIn("assistant message summary", workflow)
         self.assertIn("provider error kinds", workflow)

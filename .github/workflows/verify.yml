@@ -38,8 +38,8 @@ jobs:
           import json
           raw = json.load(open("/tmp/default.json"))
           text = json.dumps(raw)
-          assert "cliproxy" in text and "deepseek-v4-flash" in text, "default model is not cliproxy/deepseek-v4-flash"
-          print("default model is cliproxy/deepseek-v4-flash")
+          assert "cliproxy" in text and "claude-opus-5" in text, "default model is not cliproxy/claude-opus-5"
+          print("default model is cliproxy/claude-opus-5")
           EOF
 
       - name: CLIProxy completion through OpenCode

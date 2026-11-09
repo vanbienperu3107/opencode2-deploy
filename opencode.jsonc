@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "cliproxy/deepseek-v4-flash",
+  "model": "cliproxy/claude-opus-5",
   "providers": {
     "cliproxy": {
       "name": "CLIProxy",
