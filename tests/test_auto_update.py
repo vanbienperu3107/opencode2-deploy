@@ -117,8 +117,9 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("runtime CLIProxy completion ->", workflow)
         self.assertIn("/api/experimental/session/$sid/wait", workflow)
         self.assertIn('"location":{"directory":"/workspace/projects"}', workflow)
-        self.assertIn('"agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}', workflow)
+        self.assertIn('"agent":"build","model":{"id":"claude-opus-5","providerID":"cliproxy"}', workflow)
         self.assertIn('"delivery":"steer"', workflow)
+        self.assertIn("claude-opus-5", workflow)
         self.assertNotIn('print("default model payload:"', workflow)
         self.assertNotIn("edge-nginx", workflow)
 
