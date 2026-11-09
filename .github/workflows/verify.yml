@@ -49,10 +49,10 @@ jobs:
         run: |
           set -euo pipefail
           auth=(-u "opencode:$PW" -H 'Content-Type: application/json' --max-time 30)
-          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify","location":{"directory":"/workspace/projects"},"agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
+          sid=$(curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session" -d '{"title":"ci-verify","location":{"directory":"/workspace/projects"},"agent":"build","model":{"id":"claude-opus-5","providerID":"cliproxy"}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')
           echo "session_id=$sid" >> "$GITHUB_OUTPUT"
           echo "session $sid"
-          curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else.","delivery":"steer","metadata":{"displayText":"Reply with exactly the single word PONG and nothing else.","agent":"build","model":{"id":"deepseek-v4-flash","providerID":"cliproxy"}}}' >/dev/null
+          curl -sf "${auth[@]}" -X POST "$BASE_URL/api/session/$sid/prompt" -d '{"text":"Reply with exactly the single word PONG and nothing else.","delivery":"steer","metadata":{"displayText":"Reply with exactly the single word PONG and nothing else.","agent":"build","model":{"id":"claude-opus-5","providerID":"cliproxy"}}}' >/dev/null
           curl -sf -u "opencode:$PW" --max-time 240 -X POST "$BASE_URL/api/experimental/session/$sid/wait" >/dev/null || true
           for i in $(seq 1 24); do
             curl -sf -u "opencode:$PW" --max-time 30 "$BASE_URL/api/session/$sid/message" > /tmp/messages.json
@@ -76,7 +76,7 @@ jobs:
           print("provider error kinds:", [{"type": m["error"].get("type"), "status": m["error"].get("status")} for m in complete if m.get("error")])
           assert complete, "CLIProxy did not complete an assistant message"
           assert not any(m.get("error") for m in complete), "assistant reported a provider error"
-          print("assistant completion received through cliproxy/deepseek-v4-flash")
+          print("assistant completion received through cliproxy/claude-opus-5")
           EOF
 
   browser:
@@ -185,7 +185,7 @@ jobs:
             code=$($SUDO docker exec "$APP" sh -c 'wget -q -S -O /dev/null --header "Authorization: Bearer $CLIPROXY_API_KEY" https://cliproxy.hangocthanh.io.vn/v1/models 2>&1 | awk "/HTTP\// {code=\$2} END {print code}"')
             echo "runtime CLIProxy models -> ${code:-000}"
             [ "$code" = 200 ] || { echo "::error::runtime CLIPROXY_API_KEY was rejected"; exit 1; }
-            code=$($SUDO docker exec "$APP" sh -c 'printf "%s" "{\"model\":\"deepseek-v4-flash\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" | wget -q -S -O /dev/null --post-file=- --header "Content-Type: application/json" --header "Authorization: Bearer $CLIPROXY_API_KEY" https://cliproxy.hangocthanh.io.vn/v1/chat/completions 2>&1 | awk "/HTTP\// {code=\$2} END {print code}"')
+            code=$($SUDO docker exec "$APP" sh -c 'printf "%s" "{\"model\":\"claude-opus-5\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}" | wget -q -S -O /dev/null --post-file=- --header "Content-Type: application/json" --header "Authorization: Bearer $CLIPROXY_API_KEY" https://cliproxy.hangocthanh.io.vn/v1/chat/completions 2>&1 | awk "/HTTP\\/.* [0-9]{3}/ {code=\$2} END {print code}"')
             echo "runtime CLIProxy completion -> ${code:-000}"
             [ "$code" = 200 ] || { echo "::error::runtime CLIPROXY_API_KEY cannot create completions"; exit 1; }
 

@@ -36,7 +36,10 @@ def valid_config() -> dict[str, object]:
                 "env": ["CLIPROXY_API_KEY"],
                 "package": "@opencode/ai/providers/openai-compatible",
                 "settings": {"baseURL": "https://cliproxy.hangocthanh.io.vn/v1", "apiKey": "{env:CLIPROXY_API_KEY}"},
-                "models": {"deepseek-v4-flash": {"name": "DeepSeek V4 Flash", "modelID": "deepseek-v4-flash"}},
+                "models": {
+                    "deepseek-v4-flash": {"name": "DeepSeek V4 Flash", "modelID": "deepseek-v4-flash"},
+                    "claude-opus-5": {"name": "Claude Opus 5", "modelID": "claude-opus-5"},
+                },
             },
         },
         "model": "cliproxy/deepseek-v4-flash",
@@ -99,6 +102,7 @@ class V2ContractValidatorTests(unittest.TestCase):
         del cases["missing_deployment_default"]["model"]
         del cases["missing_model"]["providers"]["cliproxy"]["models"]  # type: ignore[index]
         cases["wrong_model_id"]["providers"]["cliproxy"]["models"]["deepseek-v4-flash"]["modelID"] = "other-model"  # type: ignore[index]
+        cases["wrong_model_id"]["providers"]["cliproxy"]["models"]["claude-opus-5"]["modelID"] = "other-model"  # type: ignore[index]
 
         for name, config in cases.items():
             with self.subTest(name=name):

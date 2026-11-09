@@ -24,6 +24,10 @@ CLIPROXY_PROVIDER = {
             "name": "DeepSeek V4 Flash",
             "modelID": "deepseek-v4-flash",
         },
+        "claude-opus-5": {
+            "name": "Claude Opus 5",
+            "modelID": "claude-opus-5",
+        },
     },
 }
 DEFAULT_MODEL = "cliproxy/deepseek-v4-flash"
