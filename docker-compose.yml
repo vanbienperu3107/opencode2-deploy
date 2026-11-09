@@ -43,13 +43,6 @@ services:
       - source: opencode-config
         target: /etc/opencode/opencode.jsonc
         mode: 0444
-    secrets:
-      - source: opencode-ssh-key
-        target: opencode_ssh_key
-        mode: 0400
-      - source: opencode-known-hosts
-        target: opencode_known_hosts
-        mode: 0400
     cap_drop:
       - ALL
     security_opt:
@@ -72,11 +65,6 @@ configs:
   opencode-config:
     file: ./opencode.jsonc
 
-secrets:
-  opencode-ssh-key:
-    file: ${OPENCODE_SSH_KEY_FILE:?OPENCODE_SSH_KEY_FILE must be set by the runtime renderer}
-  opencode-known-hosts:
-    file: ${OPENCODE_SSH_KNOWN_HOSTS_FILE:?OPENCODE_SSH_KNOWN_HOSTS_FILE must be set by the runtime renderer}
 
 networks:
   edge:

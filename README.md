@@ -1,9 +1,8 @@
 # OpenCode v2 deployment baseline
 
 This public repository contains a secret-free deployment contract for an
-isolated OpenCode v2 runtime: a dedicated Tailscale sidecar, the OpenCode
-service, and tooling for a dedicated Tailnet SSH identity. It contains no
-runtime secrets or SSH private material.
+isolated OpenCode v2 runtime: a dedicated Tailscale sidecar and the OpenCode
+service. It contains no runtime secrets.
 
 ## Prerequisites
 
@@ -45,7 +44,7 @@ issue. Major-version upgrades stay manual.
 
 ### Official image verification
 
-The official `v2.0.32` image Dockerfile has no `USER` directive and installs
+The official OpenCode image has no `USER` directive and installs
 the binary at `/usr/local/bin/opencode`; it therefore runs as the image's
 default root user. This contract intentionally does **not** invent an
 `opencode` UID or `/home/opencode` path: persistent OpenCode state is mounted
@@ -57,7 +56,7 @@ the `@opencode/ai/providers/openai-compatible` provider package used here.
 
 Copy `.env.example` only on the deployment host or in a protected CI runtime,
 then supply nonempty values through the approved secret mechanism. Do not
-commit `.env`, a `secrets/` directory, private SSH keys, API keys, auth keys,
+commit `.env`, a `secrets/` directory, API keys, auth keys,
 or generated backups. The committed example intentionally has blank values.
 Production Compose fails before rendering or starting when either
 `OPENCODE_SERVER_PASSWORD` or `TS_AUTHKEY` is unset or empty. CI uses only the
@@ -87,72 +86,6 @@ sidecar receives TUN and `NET_ADMIN`, assert the app's network/volume/config/
 healthcheck isolation and nonempty required-secret interpolation, and validate
 the exact V2 CLIProxy configuration. They do not start a runtime or authenticate
 to Tailnet.
-
-## Dedicated Tailnet SSH identity
-
-Never use `root`, an existing infrastructure deploy key, public IP addressing,
-or an SSH configuration that disables host-key checks. An administrator with
-console-authorized root access runs the provisioning script **locally on each
-approved Tailnet target**, supplying only a newly generated, dedicated Ed25519
-*public* key:
-
-```bash
-sudo bash scripts/provision-opencode-ssh-user.sh \
-  --public-key-file /secure/operator/opencode_tailnet.pub
-```
-
-The script accepts exactly one valid `ssh-ed25519` public key and creates the
-non-root `opencode` account and private `.ssh` directory only when that account
-does not already exist. It locks the new account's password before adding the
-exact key once. It **never repairs or provisions an existing `opencode` account**:
-when one exists, it fails before any mutation, including below that account's
-home directory. This also prevents `.ssh` or `authorized_keys` symlinks in an
-existing home from redirecting a root write. It also fails closed when the
-account database lookup is inconclusive, and it never reuses a leftover home
-directory left behind by a deleted account. It refuses blank, private, and
-non-Ed25519 key input. It does not copy, print, or create a private key.
-
-Build the pinned known-hosts content from a reviewed, private inventory created
-out of band. Each non-comment line has the format:
-
-```text
-tailnet-hostname SHA256:fingerprint key-type base64-host-key
-```
-
-Hostnames must be literal Tailnet names ending in `.ts.net` or this
-Headscale deployment's MagicDNS domain `.tail.hangocthanh.io.vn`.
-
-For example, after independently reviewing the hostname, public host key and
-SHA256 fingerprint through an approved operator channel:
-
-```bash
-bash scripts/build-known-hosts.sh \
-  --inventory /secure/operator/opencode-tailnet-hosts.reviewed \
-  --output /secure/operator/opencode_known_hosts
-```
-
-The builder never calls `ssh-keyscan`; it validates every reviewed fingerprint
-against the supplied key, writes a `0600` known-hosts file, and uses
-`ssh-keygen -F` to confirm every hostname was pinned. Store only the dedicated
-private key and the generated known-hosts content in the later repository's
-GitHub Secrets. The reviewed inventory, target hostnames and fingerprints
-belong in a private operator runbook, never this public repository.
-
-Any later SSH invocation must use the dedicated identity and keep strict host
-verification enabled, for example:
-
-```bash
-ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
-  -o UserKnownHostsFile=/run/secrets/opencode_known_hosts \
-  -i /run/secrets/opencode_ssh_key \
-  opencode@approved-tailnet-host true
-```
-
-Validate these safe-script contracts without connecting to any node:
-
-```bash
-bash tests/ssh-policy-contract.sh
-```
 
 ## Volume backup and restore boundary
 

@@ -37,14 +37,12 @@ jobs:
         env:
           OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
           CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
-          OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
-          OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
           SSH_HOST_VPN4: ${{ secrets.SSH_HOST_VPN4 }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
-          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY OPENCODE_SSH_PRIVATE_KEY OPENCODE_SSH_KNOWN_HOSTS SSH_HOST_VPN4 SSH_USER SSH_KEY TS_AUTHKEY; do
+          for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY SSH_HOST_VPN4 SSH_USER SSH_KEY TS_AUTHKEY; do
             test -n "${!name}" || { echo "::error::missing secret $name"; exit 1; }
           done
           printf '%s' "$TS_AUTHKEY" | grep -Eq '^[A-Za-z0-9_-]+$' || { echo "::error::TS_AUTHKEY has an invalid format"; exit 1; }
@@ -71,7 +69,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || '22' }}
-          envs: REF,TS_AUTHKEY,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY,OPENCODE_SSH_PRIVATE_KEY,OPENCODE_SSH_KNOWN_HOSTS
+          envs: REF,TS_AUTHKEY,OPENCODE_SERVER_PASSWORD,CLIPROXY_API_KEY
           script_stop: true
           command_timeout: 15m
           script: |
@@ -97,8 +95,6 @@ jobs:
             # so redeploys keep the same Tailnet node.
             $SUDO env OUTPUT_DIR="$DEST" OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD" \
               CLIPROXY_API_KEY="$CLIPROXY_API_KEY" TS_AUTHKEY="$TS_AUTHKEY" \
-              OPENCODE_SSH_PRIVATE_KEY="$OPENCODE_SSH_PRIVATE_KEY" \
-              OPENCODE_SSH_KNOWN_HOSTS="$OPENCODE_SSH_KNOWN_HOSTS" \
               bash scripts/render-runtime-env.sh
             RUNTIME_ENV="$DEST/current/.env"
             $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy config -q
@@ -117,8 +113,6 @@ jobs:
           REF: ${{ inputs.ref }}
           OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
           CLIPROXY_API_KEY: ${{ secrets.CLIPROXY_API_KEY }}
-          OPENCODE_SSH_PRIVATE_KEY: ${{ secrets.OPENCODE_SSH_PRIVATE_KEY }}
-          OPENCODE_SSH_KNOWN_HOSTS: ${{ secrets.OPENCODE_SSH_KNOWN_HOSTS }}
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
 
       - name: Verify public endpoint requires authentication

@@ -117,6 +117,9 @@ def validate(compose: dict[str, object]) -> None:
     if not isinstance(healthcheck_test, list) or not all(isinstance(part, str) for part in healthcheck_test) or "/api/info" not in " ".join(healthcheck_test) or "@127.0.0.1" in " ".join(healthcheck_test) or "Authorization: Basic" not in " ".join(healthcheck_test):
         fail("application healthcheck is missing")
 
+    if app.get("secrets") or compose.get("secrets"):
+        fail("application must not mount unsupported SSH secrets")
+
     app_environment = environment(app, "application")
     sidecar_environment = environment(sidecar, "sidecar")
     if not app_environment.get("OPENCODE_SERVER_PASSWORD"):

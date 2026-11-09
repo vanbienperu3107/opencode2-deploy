@@ -99,7 +99,14 @@ jobs:
             page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()) })
             page.on("pageerror", (e) => errors.push(String(e)))
             const response = await page.goto(base + "/", { waitUntil: "networkidle", timeout: 60000 })
-            await page.waitForTimeout(3000)
+            const usePassword = page.getByRole("button", { name: "Use password" })
+            if (await usePassword.isVisible()) {
+              await usePassword.click()
+              await page.locator("#server-connect-url").fill(base)
+              await page.locator("#server-connect-password").fill(process.env.PW)
+              await page.getByRole("button", { name: "Connect" }).click()
+              await page.waitForTimeout(3000)
+            }
             await page.screenshot({ path: `ui-${name}.png`, fullPage: true })
             const metrics = await page.evaluate(() => {
               const overflowX = document.documentElement.scrollWidth > window.innerWidth + 1
@@ -107,13 +114,13 @@ jobs:
                 .filter((el) => el.childElementCount === 0 && el.textContent.trim() && el.getBoundingClientRect().width > 0)
                 .map((el) => parseFloat(getComputedStyle(el).fontSize))
               const body = document.body.innerText
-              return { overflowX, minFont: sizes.length ? Math.min(...sizes) : 0, textLength: body.length, signIn: /password|sign in|đăng nhập/i.test(body), sample: body.slice(0, 200) }
+              return { overflowX, minFont: sizes.length ? Math.min(...sizes) : 0, textLength: body.length, connectScreen: /Connect to a server/.test(body), sample: body.slice(0, 200) }
             })
             console.log(name, "status", response.status(), JSON.stringify(metrics))
             console.log(name, "console errors", errors.length, errors.slice(0, 5))
             if (response.status() !== 200) failed = true
             if (metrics.textLength < 20) { console.log(name, "page rendered almost no text"); failed = true }
-            if (metrics.signIn) { console.log(name, "still on sign-in screen despite credentials"); failed = true }
+            if (metrics.connectScreen) { console.log(name, "still on connect screen after password flow"); failed = true }
             if (metrics.overflowX) { console.log(name, "horizontal overflow"); failed = true }
             if (metrics.minFont && metrics.minFont < 11) { console.log(name, "text smaller than 11px"); failed = true }
             if (errors.length) failed = true
@@ -136,7 +143,7 @@ jobs:
     if: always() && needs.api.outputs.session_id != ''
     runs-on: ubuntu-latest
     steps:
-      - name: Tailnet, SSH identity, persistence and fail2ban on vpn4
+      - name: Tailnet, persistence and fail2ban on vpn4
         uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
           SESSION_ID: ${{ needs.api.outputs.session_id }}
@@ -159,16 +166,6 @@ jobs:
             $SUDO docker exec "$TS" tailscale status --self --peers=false
             peer=$($SUDO docker exec "$TS" tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); ps=[p for p in (d.get("Peer") or {}).values() if p.get("Online")]; print(ps[0]["TailscaleIPs"][0] if ps else "")')
             if [ -n "$peer" ]; then $SUDO docker exec "$TS" tailscale ping -c 3 "$peer" | tail -n 1; else echo "no online peer to ping"; exit 1; fi
-
-            echo "== SSH identity (dedicated key, strict host keys)"
-            $SUDO docker exec "$APP" sh -c 'test -s /run/secrets/opencode_ssh_key && test -s /run/secrets/opencode_known_hosts && echo "secrets mounted"; command -v ssh || echo "no ssh client in image"'
-            hosts=$($SUDO docker exec "$APP" sh -c "awk '{print \$1}' /run/secrets/opencode_known_hosts")
-            echo "pinned hosts: $(echo "$hosts" | wc -l) ($(echo "$hosts" | sed -E 's/^[^.]+/<host>/' | sort -u | tr '\n' ' '))"
-            ssh_ok=0
-            for h in $hosts; do
-              if $SUDO docker exec "$APP" sh -c "command -v ssh >/dev/null && ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/secrets/opencode_known_hosts -i /run/secrets/opencode_ssh_key opencode@$h 'id -un'" 2>&1 | sed 's/^/  /'; then ssh_ok=1; fi
-            done
-            [ "$ssh_ok" = 1 ] && echo "SSH: PASS" || echo "SSH: FAIL (no pinned host accepted the dedicated identity)"
 
             echo "== Persistence across restart"
             $SUDO docker exec "$APP" sh -c 'echo persist-check > /workspace/projects/.ci-persist && test -d /root'
@@ -214,7 +211,6 @@ jobs:
             ps -eo args | grep -c '[d]ocker-proxy.*-host-port 443' | sed 's/^/docker-proxy processes for 443: /'
             cat /etc/docker/daemon.json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print("userland-proxy:", d.get("userland-proxy", "default(true)"))' 2>/dev/null || echo "userland-proxy: default(true) (no daemon.json)"
 
-            [ "$ssh_ok" = 1 ]
 
   fail2ban-ban:
     needs: host
