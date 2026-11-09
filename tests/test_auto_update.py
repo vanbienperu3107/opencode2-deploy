@@ -112,6 +112,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn('page.locator("#server-connect-url")', workflow)
         self.assertIn("CLIProxy did not complete an assistant message", workflow)
         self.assertIn("assistant message summary", workflow)
+        self.assertIn("provider error kinds", workflow)
         self.assertIn("/api/experimental/session/$sid/wait", workflow)
         self.assertNotIn('print("default model payload:"', workflow)
         self.assertNotIn("edge-nginx", workflow)

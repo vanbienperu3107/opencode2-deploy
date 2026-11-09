@@ -73,6 +73,7 @@ jobs:
           complete = [m for m in assistant if (m.get("time") or {}).get("completed")]
           summary = [{"finish": m.get("finish"), "content_types": [p.get("type") for p in m.get("content", [])], "has_error": bool(m.get("error"))} for m in complete]
           print("assistant message summary:", summary)
+          print("provider error kinds:", [{"type": m["error"].get("type"), "status": m["error"].get("status")} for m in complete if m.get("error")])
           assert complete, "CLIProxy did not complete an assistant message"
           assert not any(m.get("error") for m in complete), "assistant reported a provider error"
           print("assistant completion received through cliproxy/deepseek-v4-flash")
