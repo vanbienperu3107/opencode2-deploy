@@ -107,6 +107,9 @@ class VerifyWorkflowTests(unittest.TestCase):
                        "docker restart", "fail2ban-client status opencode2-401", "Pixel 7", "width: 1440"):
             self.assertIn(marker, workflow)
         self.assertIn('page.locator("#server-connect-url")', workflow)
+        self.assertIn("CLIProxy did not produce assistant text", workflow)
+        self.assertNotIn('print("default model payload:"', workflow)
+        self.assertNotIn("edge-nginx", workflow)
 
 
 if __name__ == "__main__":

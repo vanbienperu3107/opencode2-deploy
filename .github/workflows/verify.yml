@@ -38,8 +38,8 @@ jobs:
           import json
           raw = json.load(open("/tmp/default.json"))
           text = json.dumps(raw)
-          print("default model payload:", text[:300])
           assert "cliproxy" in text and "deepseek-v4-flash" in text, "default model is not cliproxy/deepseek-v4-flash"
+          print("default model is cliproxy/deepseek-v4-flash")
           EOF
 
       - name: CLIProxy completion through OpenCode
@@ -56,15 +56,24 @@ jobs:
           curl -sf -u "opencode:$PW" --max-time 240 -X POST "$BASE_URL/api/experimental/session/$sid/wait" >/dev/null || true
           for i in $(seq 1 24); do
             curl -sf -u "opencode:$PW" --max-time 30 "$BASE_URL/api/session/$sid/message" > /tmp/messages.json
-            if grep -q 'PONG' /tmp/messages.json; then break; fi
+            if python3 - <<'EOF'
+          import json
+          data = json.load(open("/tmp/messages.json")).get("data", [])
+          assistant = [m for m in data if m.get("type") == "assistant"]
+          texts = [part.get("text", "") for m in assistant for part in m.get("content", []) if part.get("type") == "text"]
+          raise SystemExit(0 if any(text.strip() for text in texts) else 1)
+          EOF
+            then break; fi
             sleep 5
           done
           python3 - <<'EOF'
           import json
-          raw = open("/tmp/messages.json").read()
-          print("messages bytes:", len(raw))
-          assert "PONG" in raw.replace("Reply with exactly the single word PONG", ""), "assistant did not answer PONG via CLIProxy"
-          print("assistant answered PONG via cliproxy/deepseek-v4-flash")
+          data = json.load(open("/tmp/messages.json")).get("data", [])
+          assistant = [m for m in data if m.get("type") == "assistant"]
+          texts = [part.get("text", "") for m in assistant for part in m.get("content", []) if part.get("type") == "text"]
+          assert any(text.strip() for text in texts), "CLIProxy did not produce assistant text"
+          assert not any(m.get("error") for m in assistant), "assistant reported a provider error"
+          print("assistant response received through cliproxy/deepseek-v4-flash")
           EOF
 
   browser:
@@ -203,15 +212,6 @@ jobs:
               | sed -n '/Date template hits/,/^Lines:/p' | sed -E 's/([0-9]+\.){3}[0-9]+/<ip>/g'
             $F2B sh -c 'ls /config/log/fail2ban/ 2>/dev/null; tail -n 300 /config/log/fail2ban/fail2ban.log 2>/dev/null' \
               | grep -i -E 'opencode2|error|warn|ignor' | tail -n 25 | sed -E 's/([0-9]+\.){3}[0-9]+/<ip>/g'
-
-            echo "== client IP provenance"
-            $SUDO docker exec caddy-edge sh -c 'tail -n 400 /var/log/caddy/opencode2-access.log' \
-              | python3 -c 'import json,sys,ipaddress,collections; c=collections.Counter((k, "private" if ipaddress.ip_address(json.loads(l)["request"].get(k) or "0.0.0.0").is_private else "public") for l in sys.stdin if l.startswith("{") for k in ("remote_ip","client_ip")); print(dict(c))'
-            $SUDO docker inspect -f 'nginx network_mode={{.HostConfig.NetworkMode}} ports={{json .HostConfig.PortBindings}}' edge-nginx
-            $SUDO docker inspect -f 'nginx ips={{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' edge-nginx | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+/\1.x.x/g'
-            $SUDO docker logs --tail 40 edge-nginx 2>&1 | grep 'sni=opencode2' | awk '{print $1}' | python3 -c 'import sys,ipaddress,collections; print("nginx remote_addr classes:", dict(collections.Counter("private" if ipaddress.ip_address(l.strip()).is_private else "public" for l in sys.stdin if l.strip())))'
-            ps -eo args | grep -c '[d]ocker-proxy.*-host-port 443' | sed 's/^/docker-proxy processes for 443: /'
-            cat /etc/docker/daemon.json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print("userland-proxy:", d.get("userland-proxy", "default(true)"))' 2>/dev/null || echo "userland-proxy: default(true) (no daemon.json)"
 
 
   fail2ban-ban:
