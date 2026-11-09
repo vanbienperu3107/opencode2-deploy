@@ -30,7 +30,7 @@ CLIPROXY_PROVIDER = {
         },
     },
 }
-DEFAULT_MODEL = "cliproxy/deepseek-v4-flash"
+DEFAULT_MODEL = "cliproxy/claude-opus-5"
 
 
 def fail(message: str) -> NoReturn:
@@ -65,7 +65,7 @@ def validate(config: dict[str, object]) -> None:
         fail("CLIProxy provider must use the required V2 OpenAI-compatible contract")
 
     if config.get("model") != DEFAULT_MODEL:
-        fail("CLIProxy deployment default model must be cliproxy/deepseek-v4-flash")
+        fail("CLIProxy deployment default model must be cliproxy/claude-opus-5")
 
     permissions = config.get("permissions")
     if not isinstance(permissions, list):

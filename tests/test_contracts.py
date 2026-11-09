@@ -42,7 +42,7 @@ def valid_config() -> dict[str, object]:
                 },
             },
         },
-        "model": "cliproxy/deepseek-v4-flash",
+        "model": "cliproxy/claude-opus-5",
         "permissions": [{"action": "*", "resource": "*", "effect": "allow"}],
     }
 
