@@ -487,7 +487,7 @@ class RuntimeComposeContractTests(unittest.TestCase):
                     "image": "ghcr.io/anomalyco/opencode:2.0.32",
                     "command": ["serve", "--hostname", "0.0.0.0", "--port", "4096"],
                     "network_mode": "service:ts-opencode2",
-                    "environment": {"OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password", "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc"},
+                    "environment": {"OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password", "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc", "OPENCODE_CONFIG_CONTENT": '{"model":"cliproxy/claude-opus-5"}'},
                     "volumes": [
                         {"type": "volume", "source": "opencode2_workspace", "target": "/workspace/projects"},
                         {"type": "volume", "source": "opencode2_state", "target": "/root"},
