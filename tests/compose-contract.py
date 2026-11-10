@@ -128,6 +128,8 @@ def validate(compose: dict[str, object]) -> None:
         fail("sidecar auth key must be nonempty after rendering")
     if app_environment.get("OPENCODE_CONFIG") != "/etc/opencode/opencode.jsonc":
         fail("application must select the managed OpenCode config")
+    if app_environment.get("OPENCODE_CONFIG_CONTENT") != '{"model":"cliproxy/claude-opus-5"}':
+        fail("application must enforce the Claude default at runtime")
 
 
 def main() -> None:

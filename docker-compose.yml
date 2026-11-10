@@ -36,6 +36,8 @@ services:
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD must be set and nonempty for deployment}
       CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:-}
       OPENCODE_CONFIG: /etc/opencode/opencode.jsonc
+      # Runtime overrides have higher precedence than persisted user config.
+      OPENCODE_CONFIG_CONTENT: '{"model":"cliproxy/claude-opus-5"}'
     volumes:
       - opencode2_workspace:/workspace/projects
       - opencode2_state:/root
