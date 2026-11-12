@@ -1,0 +1,34 @@
+name: Probe CLIProxy models
+
+# Read-only inventory: list models CLIProxy advertises and try a 1-token
+# completion with each, using the same key OpenCode uses. Prints only the model
+# id and HTTP status; never the key, headers or response bodies.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List and probe models
+        env:
+          CLIPROXY_PROBE_KEY: ${{ secrets.CLIPROXY_API_KEY }}
+        run: |
+          set -uo pipefail
+          base=https://cliproxy.hangocthanh.io.vn/v1
+          curl -sf --max-time 30 -H "Authorization: Bearer ${CLIPROXY_PROBE_KEY}" "$base/models" > /tmp/models.json
+          python3 -c 'import json; ids=sorted({m["id"] for m in json.load(open("/tmp/models.json")).get("data", [])}); open("/tmp/ids.txt","w").write("\n".join(ids)+"\n"); print("advertised:", len(ids))'
+          : > /tmp/result.tsv
+          while read -r id; do
+            [ -n "$id" ] || continue
+            body=$(python3 -c 'import json,sys; print(json.dumps({"model": sys.argv[1], "max_tokens": 16, "messages": [{"role": "user", "content": "ping"}]}))' "$id")
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 \
+              -H "Authorization: Bearer ${CLIPROXY_PROBE_KEY}" -H 'Content-Type: application/json' \
+              --data "$body" "$base/chat/completions" || true)
+            printf '%s\t%s\n' "${code:-000}" "$id" | tee -a /tmp/result.tsv
+          done < /tmp/ids.txt
+          echo "== working (200) =="
+          awk -F'\t' '$1 == "200" {print $2}' /tmp/result.tsv
