@@ -24,5 +24,17 @@
   },
   "permissions": [
     { "action": "*", "resource": "*", "effect": "allow" }
-  ]
+  ],
+  "mcp": {
+    "servers": {
+      "obscura": {
+        "type": "remote",
+        "url": "http://obscura:8080/mcp",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:OBSCURA_MCP_TOKEN}"
+        }
+      }
+    }
+  }
 }
