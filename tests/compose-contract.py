@@ -62,8 +62,24 @@ def validate(compose: dict[str, object]) -> None:
 
     if sidecar.get("image") != "tailscale/tailscale:v1.104.4":
         fail("sidecar image must be pinned")
-    if not re.fullmatch(r"ghcr\.io/anomalyco/opencode:[0-9]+\.[0-9]+\.[0-9]+", str(app.get("image", ""))):
+    # The application runs an image built from this repository so the agent
+    # keeps its CLI tooling. Both the derived tag and the upstream base it is
+    # built from must stay pinned to an exact version.
+    if not re.fullmatch(r"opencode2-tools:([0-9]+\.[0-9]+\.[0-9]+)", str(app.get("image", ""))):
         fail("application image must be pinned")
+    build = app.get("build")
+    if not isinstance(build, dict):
+        fail("application must be built from this repository")
+    if build.get("dockerfile") not in ("Dockerfile", str(Path(build.get("context", "")) / "Dockerfile")):
+        fail("application must build from the repository Dockerfile")
+    build_args = build.get("args")
+    if not isinstance(build_args, dict):
+        fail("application build arguments must render as an object")
+    upstream = str(build_args.get("OPENCODE_IMAGE", ""))
+    if not re.fullmatch(r"ghcr\.io/anomalyco/opencode:[0-9]+\.[0-9]+\.[0-9]+", upstream):
+        fail("application upstream base image must be pinned")
+    if upstream.rsplit(":", maxsplit=1)[1] != str(app.get("image", "")).rsplit(":", maxsplit=1)[1]:
+        fail("derived image tag must track the pinned upstream version")
     if app.get("network_mode") not in ("service:ts-opencode2", "service:opencode2-ts-opencode2"):
         fail("application must share only the sidecar network namespace")
     if any(field in app for field in ("ports", "devices", "cap_add", "privileged", "networks")):
