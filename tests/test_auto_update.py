@@ -52,7 +52,8 @@ class VersionHelperTests(unittest.TestCase):
         result = self.run_helper("set", "2.2.6")
         self.assertEqual(result.returncode, 0, result.stderr)
         after = (self.tmp / "docker-compose.yml").read_text(encoding="utf-8")
-        self.assertIn("image: ghcr.io/anomalyco/opencode:2.2.6\n", after)
+        self.assertIn("OPENCODE_IMAGE: ghcr.io/anomalyco/opencode:2.2.6\n", after)
+        self.assertIn("image: opencode2-tools:2.2.6\n", after)
         self.assertIn("tailscale/tailscale:v1.104.4", after)
         self.assertEqual(len(before.splitlines()), len(after.splitlines()))
 

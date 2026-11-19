@@ -100,7 +100,10 @@ jobs:
               bash scripts/render-runtime-env.sh
             RUNTIME_ENV="$DEST/current/.env"
             $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy config -q
-            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy pull -q
+            # The sidecar is pulled; the application image is built here from
+            # the repository Dockerfile so the agent keeps its CLI tooling.
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy pull -q --ignore-buildable
+            $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy build -q --pull
             $SUDO docker compose --env-file "$RUNTIME_ENV" -p opencode2-deploy up -d --remove-orphans
             for i in $(seq 1 30); do
               state=$($SUDO docker inspect -f '{{.State.Health.Status}}' opencode2-deploy-opencode2-1 2>/dev/null || echo starting)

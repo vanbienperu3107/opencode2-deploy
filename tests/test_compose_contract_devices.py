@@ -27,7 +27,8 @@ def rendered_compose() -> dict[str, object]:
                 "networks": {"edge": {"aliases": ["opencode2"]}},
             },
             "opencode2": {
-                "image": "ghcr.io/anomalyco/opencode:2.0.32",
+                "image": "opencode2-tools:2.0.32",
+                "build": {"context": "/repo", "dockerfile": "Dockerfile", "args": {"OPENCODE_IMAGE": "ghcr.io/anomalyco/opencode:2.0.32"}},
                 "network_mode": "service:ts-opencode2",
                 "environment": {"OPENCODE_SERVER_PASSWORD": "ci-placeholder-server-password", "OPENCODE_CONFIG": "/etc/opencode/opencode.jsonc", "OPENCODE_CONFIG_CONTENT": '{"model":"cliproxy/claude-opus-5"}'},
                 "volumes": [

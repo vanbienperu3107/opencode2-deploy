@@ -4,7 +4,8 @@
   current                 print the version pinned in docker-compose.yml
   latest <releases.json>  print the newest stable vMAJOR.x.y release of the
                           pinned major from a GitHub releases API listing
-  set <version>           rewrite the single image pin in docker-compose.yml
+  set <version>           rewrite the upstream build pin and the derived image
+                          tag in docker-compose.yml
 """
 
 from __future__ import annotations
@@ -16,7 +17,10 @@ from pathlib import Path
 
 COMPOSE = Path(__file__).resolve().parents[1] / "docker-compose.yml"
 IMAGE = "ghcr.io/anomalyco/opencode"
-PIN = re.compile(r"^(\s*image:\s*)" + re.escape(IMAGE) + r":(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
+# The upstream release is pinned once, as the build argument that the
+# Dockerfile derives the deployed image from.
+PIN = re.compile(r"^(\s*OPENCODE_IMAGE:\s*)" + re.escape(IMAGE) + r":(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
+TAG_PIN = re.compile(r"^(\s*image:\s*opencode2-tools:)(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
 VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
@@ -57,7 +61,11 @@ def set_version(version: str) -> None:
     parse(version)
     text = COMPOSE.read_text(encoding="utf-8")
     current()
-    COMPOSE.write_text(PIN.sub(lambda m: f"{m.group(1)}{IMAGE}:{version}", text), encoding="utf-8")
+    if len(TAG_PIN.findall(text)) != 1:
+        fail("docker-compose.yml must carry exactly one derived image tag")
+    text = PIN.sub(lambda m: f"{m.group(1)}{IMAGE}:{version}", text)
+    text = TAG_PIN.sub(lambda m: f"{m.group(1)}{version}", text)
+    COMPOSE.write_text(text, encoding="utf-8")
 
 
 def main(argv: list[str]) -> None:

@@ -23,7 +23,15 @@ services:
           - opencode2
 
   opencode2:
-    image: ghcr.io/anomalyco/opencode:2.3.2
+    # Built from this repository's Dockerfile so the agent keeps its CLI
+    # tooling; OPENCODE_IMAGE is the single pinned upstream release that
+    # the auto-update workflow rewrites.
+    image: opencode2-tools:2.3.2
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENCODE_IMAGE: ghcr.io/anomalyco/opencode:2.3.2
     command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
     restart: unless-stopped
     init: true
