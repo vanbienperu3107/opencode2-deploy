@@ -59,6 +59,9 @@ services:
       - source: hindsight-ca
         target: /etc/opencode/hindsight-ca.crt
         mode: 0444
+      - source: hindsight-agent
+        target: /etc/opencode/hindsight-agent.md
+        mode: 0444
     cap_drop:
       - ALL
     security_opt:
@@ -82,6 +85,8 @@ configs:
     file: ./opencode.jsonc
   hindsight-ca:
     file: ./hindsight-ca.crt
+  hindsight-agent:
+    file: ./hindsight-agent.md
 
 
 networks:
