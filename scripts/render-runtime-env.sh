@@ -11,7 +11,7 @@ fail() {
 
 output_dir=${OUTPUT_DIR:?OUTPUT_DIR must point at the deployment directory}
 
-for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY TS_AUTHKEY OBSCURA_MCP_TOKEN; do
+for name in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY TS_AUTHKEY OBSCURA_MCP_TOKEN HINDSIGHT_API_KEY; do
   value=${!name:-}
   test -n "$value" || fail "$name is required"
   case "$value" in
@@ -32,6 +32,7 @@ current="$output_dir/current"
   printf 'CLIPROXY_API_KEY=%s\n' "$CLIPROXY_API_KEY"
   printf 'TS_AUTHKEY=%s\n' "$TS_AUTHKEY"
   printf 'OBSCURA_MCP_TOKEN=%s\n' "$OBSCURA_MCP_TOKEN"
+  printf 'HINDSIGHT_API_KEY=%s\n' "$HINDSIGHT_API_KEY"
 } >"$generation/.env"
 chmod 0600 "$generation/.env"
 
