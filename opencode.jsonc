@@ -4,7 +4,9 @@
   "providers": {
     "cliproxy": {
       "name": "CLIProxy",
-      "env": ["CLIPROXY_API_KEY"],
+      "env": [
+        "CLIPROXY_API_KEY"
+      ],
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": {
         "baseURL": "https://cliproxy.hangocthanh.io.vn/v1",
@@ -23,6 +25,23 @@
     }
   },
   "permissions": [
-    { "action": "*", "resource": "*", "effect": "allow" }
-  ]
+    {
+      "action": "*",
+      "resource": "*",
+      "effect": "allow"
+    }
+  ],
+  "mcp": {
+    "servers": {
+      "hindsight": {
+        "type": "remote",
+        "url": "https://172.31.250.36:8888/mcp",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:HINDSIGHT_API_KEY}",
+          "X-Bank-Id": "opencode2"
+        }
+      }
+    }
+  }
 }

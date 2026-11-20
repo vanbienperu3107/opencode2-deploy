@@ -19,7 +19,7 @@ test -f "$renderer" || fail 'missing runtime env renderer'
 grep -Fq 'workflow_dispatch:' "$workflow" || fail 'deploy must be manually dispatched'
 grep -Fq 'permissions:' "$workflow" || fail 'deploy must declare token permissions'
 grep -Fq 'contents: read' "$workflow" || fail 'deploy token must stay read-only'
-for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY SSH_KEY SSH_HOST_VPN4 SSH_USER TS_AUTHKEY OBSCURA_MCP_TOKEN; do
+for secret in OPENCODE_SERVER_PASSWORD CLIPROXY_API_KEY SSH_KEY SSH_HOST_VPN4 SSH_USER TS_AUTHKEY OBSCURA_MCP_TOKEN HINDSIGHT_API_KEY; do
   grep -Fq "secrets.$secret" "$workflow" || fail "deploy does not consume $secret"
 done
 if grep -Eq 'OPENCODE_SSH_|opencode_ssh_key|opencode_known_hosts' "$workflow" "$renderer"; then
@@ -83,6 +83,7 @@ env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   CLIPROXY_API_KEY='contract-cliproxy' \
   TS_AUTHKEY='contract-authkey' \
   OBSCURA_MCP_TOKEN='contract-obscura' \
+  HINDSIGHT_API_KEY='contract-hindsight' \
   bash "$renderer" >"$test_root/stdout" 2>&1 || fail 'renderer rejected complete secrets'
 current="$test_root/out/current"
 test -L "$current" || fail 'runtime renderer must publish an atomic current generation pointer'
@@ -99,18 +100,20 @@ env -i PATH="$PATH" OUTPUT_DIR="$test_root/out" \
   CLIPROXY_API_KEY='next-cliproxy' \
   TS_AUTHKEY='next-authkey' \
   OBSCURA_MCP_TOKEN='next-obscura' \
+  HINDSIGHT_API_KEY='next-hindsight' \
   bash "$renderer" >/dev/null 2>&1 || fail 'renderer rejected a replacement generation'
 test "$(readlink "$current")" != "$previous_target" || fail 'replacement generation did not replace the current pointer'
 test "$(readlink -f "$current")" != "$generation" || fail 'replacement generation did not change the live generation'
 grep -Fxq 'OPENCODE_SERVER_PASSWORD=contract-password' "$generation/.env" || fail 'failed generation changed existing env material'
 grep -Fxq 'OPENCODE_SERVER_PASSWORD=next-password' "$(readlink -f "$current")/.env" || fail 'replacement generation lost new env material'
+grep -Eq '^HINDSIGHT_API_KEY=' "$generation/.env" || fail 'runtime env must carry HINDSIGHT_API_KEY'
 if grep -Eq 'contract-(password|cliproxy|authkey|obscura)' "$test_root/stdout"; then
   fail 'renderer printed a secret value'
 fi
 
 # Values that could inject extra env lines are refused.
 if env -i PATH="$PATH" OUTPUT_DIR="$test_root/inject" \
-  OPENCODE_SERVER_PASSWORD=$'contract\nTS_AUTHKEY=evil' CLIPROXY_API_KEY='x' TS_AUTHKEY='y' OBSCURA_MCP_TOKEN='z' \
+  OPENCODE_SERVER_PASSWORD=$'contract\nTS_AUTHKEY=evil' CLIPROXY_API_KEY='x' TS_AUTHKEY='y' OBSCURA_MCP_TOKEN='z' HINDSIGHT_API_KEY='h' \
   bash "$renderer" >/dev/null 2>&1; then
   fail 'renderer accepted a multi-line secret'
 fi

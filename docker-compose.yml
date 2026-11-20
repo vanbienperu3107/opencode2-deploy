@@ -44,6 +44,8 @@ services:
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD must be set and nonempty for deployment}
       CLIPROXY_API_KEY: ${CLIPROXY_API_KEY:-}
       OBSCURA_MCP_TOKEN: ${OBSCURA_MCP_TOKEN:?OBSCURA_MCP_TOKEN must be set and nonempty for deployment}
+      HINDSIGHT_API_KEY: ${HINDSIGHT_API_KEY:?HINDSIGHT_API_KEY must be set and nonempty for deployment}
+      NODE_EXTRA_CA_CERTS: /etc/opencode/hindsight-ca.crt
       OPENCODE_CONFIG: /etc/opencode/opencode.jsonc
       # Runtime overrides have higher precedence than persisted user config.
       OPENCODE_CONFIG_CONTENT: '{"model":"cliproxy/claude-opus-5"}'
@@ -53,6 +55,9 @@ services:
     configs:
       - source: opencode-config
         target: /etc/opencode/opencode.jsonc
+        mode: 0444
+      - source: hindsight-ca
+        target: /etc/opencode/hindsight-ca.crt
         mode: 0444
     cap_drop:
       - ALL
@@ -75,6 +80,8 @@ volumes:
 configs:
   opencode-config:
     file: ./opencode.jsonc
+  hindsight-ca:
+    file: ./hindsight-ca.crt
 
 
 networks:
