@@ -138,7 +138,7 @@ export async function attach(ctx: HookRegistrar, deps: Deps): Promise<boolean> {
         contextCalls: 0,
       }
       entry.promise = runRecall(cfg, query, deps.fetchImpl, undefined, recallTimeoutMs)
-        .catch((): RecallResult => ({ status: "error", items: [], received: 0 }))
+        .catch((): RecallResult => ({ status: "error", items: [], received: 0, failure: { stage: "unknown", kind: "unexpected", cid: "" } }))
         .then((r) => {
           entry.recallMs = Date.now() - startedAt
           return r
@@ -188,6 +188,10 @@ export async function attach(ctx: HookRegistrar, deps: Deps): Promise<boolean> {
         memory_blocks: blocks,
         insert_action: action,
         recall_ms: entry.recallMs ?? null,
+        recall_stage: entry.resolved.failure?.stage,
+        recall_kind: entry.resolved.failure?.kind,
+        recall_http: entry.resolved.failure?.http,
+        recall_cid: entry.resolved.failure?.cid,
         context_hook_ms: Date.now() - t0,
         received: stats.received,
         inserted: stats.inserted,

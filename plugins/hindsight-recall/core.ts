@@ -12,11 +12,22 @@ export interface RecallItem {
   timeLabel?: string
 }
 
+export interface RecallFailure {
+  // Giai đoạn lỗi: initialize | notify | tools_call | parse | token.
+  stage: string
+  // Loại lỗi: timeout | http | rpc | tool | parse | network | token.
+  kind: string
+  http?: number
+  // ID tương quan ngẫu nhiên, không liên quan nội dung.
+  cid: string
+}
+
 export interface RecallResult {
   status: RecallStatus
   items: RecallItem[]
   // Số kết quả Hindsight trả về (kể cả mục rỗng). Không phải số mục đã chèn.
   received: number
+  failure?: RecallFailure
 }
 
 export const CONTEXT_WAIT_MS = 10000
@@ -284,22 +295,45 @@ export async function runRecall(
   readTok: (f: string) => string = readToken,
   timeoutMs: number = RECALL_TIMEOUT_MS,
 ): Promise<RecallResult> {
-  const fail: RecallResult = { status: "error", items: [], received: 0 }
+  const cid = newCid()
   let token: string
   try {
     token = readTok(cfg.tokenFile)
   } catch {
-    return fail
+    return { status: "error", items: [], received: 0, failure: { stage: "token", kind: "token", cid } }
   }
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
-    return await doRecall(cfg, query, fetchImpl, token, ac.signal)
-  } catch {
-    return { ...fail, status: ac.signal.aborted ? "timeout" : "error" }
+    return await doRecall(cfg, query, fetchImpl, token, ac.signal, cid)
+  } catch (e) {
+    // Chỉ lấy loại lỗi, không lưu message gốc (có thể chứa dữ liệu).
+    const timedOut = ac.signal.aborted
+    return {
+      status: timedOut ? "timeout" : "error",
+      items: [],
+      received: 0,
+      failure: { stage: "unknown", kind: timedOut ? "timeout" : failKind(e), cid },
+    }
   } finally {
     clearTimeout(timer)
   }
+}
+
+function newCid(): string {
+  return Math.random().toString(36).slice(2, 10)
+}
+
+// Phân loại lỗi để log; không trả về message gốc.
+function failKind(e: unknown): string {
+  if (e instanceof SyntaxError) return "parse"
+  return "network"
+}
+
+function failAt(stage: string, kind: string, cid: string, http?: number): RecallResult {
+  const failure: RecallFailure = { stage, kind, cid }
+  if (http !== undefined) failure.http = http
+  return { status: "error", items: [], received: 0, failure }
 }
 
 async function doRecall(
@@ -308,8 +342,8 @@ async function doRecall(
   fetchImpl: FetchLike,
   token: string,
   signal: AbortSignal,
+  cid: string,
 ): Promise<RecallResult> {
-  const fail: RecallResult = { status: "error", items: [], received: 0 }
   const init = await fetchImpl(cfg.proxyUrl, {
     method: "POST",
     headers: buildHeaders(token),
@@ -322,7 +356,7 @@ async function doRecall(
     }),
   })
   await init.text().catch(() => "")
-  if (init.status !== 200) return fail
+  if (init.status !== 200) return failAt("initialize", "http", cid, init.status)
   const sid = init.headers.get("mcp-session-id") ?? undefined
 
   const notify = await fetchImpl(cfg.proxyUrl, {
@@ -346,8 +380,23 @@ async function doRecall(
   })
   if (call.status !== 200) {
     await call.text().catch(() => "")
-    return fail
+    return failAt("tools_call", "http", cid, call.status)
   }
-  const text = extractToolText(parseRpc(await call.text()))
-  return toResult(text)
+  let rpc: any
+  try {
+    rpc = parseRpc(await call.text())
+  } catch {
+    return failAt("tools_call", "parse", cid)
+  }
+  if (rpc?.error) return failAt("tools_call", "rpc", cid)
+  if (rpc?.result?.isError) return failAt("tools_call", "tool", cid)
+  let text: string
+  try {
+    text = extractToolText(rpc)
+  } catch {
+    return failAt("tools_call", "parse", cid)
+  }
+  const r = toResult(text)
+  if (r.status === "error") return failAt("tools_call", "parse", cid)
+  return r
 }
