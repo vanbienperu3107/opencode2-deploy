@@ -178,7 +178,8 @@ export async function attach(ctx: SynthRegistrar, deps: Deps): Promise<boolean> 
         return
       }
       const hash = createHash("sha256").update(block).digest("hex").slice(0, 16)
-      // Block trùng với block gần nhất: không chèn lại. Block cũ vẫn đúng ngữ cảnh.
+      // lastHash chỉ ghi nhận block gần nhất để theo dõi, KHÔNG dùng để chặn chèn.
+      // Lý do: nếu hai lượt liên tiếp có cùng kết quả, lượt sau vẫn cần memory (nếu bỏ chèn, model mất ngữ cảnh).
       try {
         await ctx.session.synthetic({ sessionID: sid, text: SYNTH_MARK + "\n" + block, resume: false })
         lastHash.delete(sid)

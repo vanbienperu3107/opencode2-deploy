@@ -194,6 +194,15 @@ test("M3 cùng memory lặp lại liên tiếp: không chèn bản sao", async (
   for (const t of ["OCS là gì?", "OCS cho tôi biết thêm", "OCS nữa đi"]) await ctx.hooks.prompt({ sessionID: "ses_M3", prompt: { text: t } })
   assert.equal(ctx.calls.length, 3)
 })
+test("M6 hai lượt liên tiếp cùng kết quả: cả hai lượt đều nhận block (không chặn trùng)", async () => {
+  const ctx = fakeCtx(); const q: string[] = []
+  await attach(ctx, { env: env(), fetchImpl: fakeFetch(q) as any, ...quiet })
+  await ctx.hooks.prompt({ sessionID: "ses_M6", prompt: { text: "OCS là gì?" } })
+  await ctx.hooks.prompt({ sessionID: "ses_M6", prompt: { text: "OCS là gì?" } })
+  assert.equal(ctx.calls.length, 2, "phải chèn cho cả hai lượt")
+  assert.ok(ctx.calls[0].text.includes("OCS"), "lượt 1 thiếu memory")
+  assert.ok(ctx.calls[1].text.includes("OCS"), "lượt 2 thiếu memory")
+})
 test("M4 cách ly session: session B không nhận memory của session A", async () => {
   const ctx = fakeCtx(); const q: string[] = []
   await attach(ctx, { env: env(), fetchImpl: fakeFetch(q) as any, ...quiet })
