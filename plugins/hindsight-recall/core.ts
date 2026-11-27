@@ -244,7 +244,7 @@ export const REF_TOKENS_ACCENTED = /(^|[^\p{L}])(đó|đây|này|kia)(?=$|[^\p{L
 // Từ tham chiếu không dấu. Không đưa "tren", "con", "cai", "the" vì là từ thông dụng.
 export const REF_TOKENS = new Set(["nay", "kia", "vay"])
 // Cụm nhiều từ cần khớp nguyên cụm (dạng đã bỏ dấu), gồm cả dạng không dấu của "đó".
-export const REF_PHRASES = ["thi sao", "the nao", "con lai", "nhu tren", "vua noi", "cai do", "dieu do", "viec do", "luc do"]
+export const REF_PHRASES = ["thi sao", "con lai", "nhu tren", "vua noi", "cai do", "dieu do", "viec do", "luc do"]
 
 export function normalizeVi(s: string): string {
   return s
@@ -255,9 +255,26 @@ export function normalizeVi(s: string): string {
     .toLowerCase()
 }
 
+// Cụm chỉ THỜI GIAN có "này/nay" (hôm nay, tuần này, lúc này...). Đây là trạng ngữ thời gian,
+// không tham chiếu tới nội dung trước đó, nên được loại trước khi tìm tín hiệu tham chiếu.
+export const TIME_PHRASES_ACC = ["hôm nay", "hôm này", "ngày nay", "tuần này", "tháng này", "năm nay", "sáng nay", "chiều nay", "tối nay", "bữa nay", "lúc này", "giờ này"]
+export const TIME_PHRASES_PLAIN = TIME_PHRASES_ACC.map((p) => normalizeVi(p))
+
+function stripTimePhrases(s: string, phrases: string[], plain: boolean): string {
+  let t = s.normalize("NFC")
+  for (const p of phrases) {
+    const re = plain
+      ? new RegExp("(^|[^a-z0-9])" + p + "(?=$|[^a-z0-9])", "g")
+      : new RegExp("(^|[^\\p{L}])" + p + "(?=$|[^\\p{L}])", "giu")
+    t = t.replace(re, "$1 ")
+  }
+  return t
+}
+
 export function needsContext(current: string): boolean {
-  if (REF_TOKENS_ACCENTED.test(current)) return true
-  const n = normalizeVi(current)
+  const acc = stripTimePhrases(current, TIME_PHRASES_ACC, false)
+  if (REF_TOKENS_ACCENTED.test(acc)) return true
+  const n = stripTimePhrases(normalizeVi(current), TIME_PHRASES_PLAIN, true)
   const words = n.split(/[^a-z0-9]+/).filter(Boolean)
   if (words.some((w) => REF_TOKENS.has(w))) return true
   const padded = " " + words.join(" ") + " "
