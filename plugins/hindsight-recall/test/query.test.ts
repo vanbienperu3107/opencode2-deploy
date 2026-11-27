@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { buildQuery, needsContext, normalizeVi, QUERY_MAX_CHARS, FOLLOWUP_MAX_CHARS } from "./core.ts"
+import { buildQuery, needsContext, normalizeVi, QUERY_MAX_CHARS, FOLLOWUP_MAX_CHARS } from "../core.ts"
 
 const PREV_BITEL = "Bitel đang triển khai gói cước mới cho khu vực miền Nam"
 const PREV_HIND = "Hindsight bank opencode2 dùng endpoint proxy nội bộ"

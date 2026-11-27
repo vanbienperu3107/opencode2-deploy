@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { runRecall, RECALL_TIMEOUT_MS } from "./core.ts"
+import { runRecall, RECALL_TIMEOUT_MS } from "../core.ts"
 
 const cfg: any = { proxyUrl: "http://proxy.test/mcp/", tokenFile: "/nonexistent", budget: {} }
 const okTok = () => "TESTTOKEN-NOT-REAL"

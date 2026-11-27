@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { writeFileSync, mkdtempSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { attach, applyBlock, BLOCK_MARK } from "./wiring.ts"
+import { attach, applyBlock, BLOCK_MARK } from "../wiring.ts"
 
 const dir = mkdtempSync(join(tmpdir(), "hr-conc-"))
 const tokenFile = join(dir, "tok")
