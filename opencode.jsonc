@@ -1,6 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "cliproxy/claude-opus-5",
+  "plugins": ["/root/.config/opencode/plugins/hindsight-recall"],
   "instructions": [
     "/etc/opencode/hindsight-agent.md"
   ],
@@ -38,10 +39,10 @@
     "servers": {
       "hindsight": {
         "type": "remote",
-        "url": "https://172.31.250.36:8888/mcp",
+        "url": "{env:HINDSIGHT_PROXY_URL}",
         "oauth": false,
         "headers": {
-          "Authorization": "Bearer {env:HINDSIGHT_API_KEY}",
+          "Authorization": "Bearer {file:/etc/opencode/secrets/hindsight-writer.token}",
           "X-Bank-Id": "opencode2"
         }
       }

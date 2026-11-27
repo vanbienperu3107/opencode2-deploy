@@ -11,4 +11,6 @@ RUN apk add --no-cache \
     jq \
     github-cli \
     git \
-    ncurses-terminfo-base
+    ncurses-terminfo-base \
+    nodejs \
+    npm
